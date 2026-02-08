@@ -69,11 +69,18 @@ html[class*="dark"] {
   word-break: break-word;
 }
 
-/* Bullet list for multi-block context (e.g. selections across list items) */
+/* Bullet list for multi-block context (selections across list items) */
 .jr-popup-context-list {
   margin: 0;
   padding-left: 1.2em;
-  list-style: disc;
+}
+
+ul.jr-popup-context-list {
+  list-style-type: disc;
+}
+
+ol.jr-popup-context-list {
+  list-style-type: decimal;
 }
 
 .jr-popup-context-list li {
@@ -84,11 +91,65 @@ html[class*="dark"] {
   margin-bottom: 0;
 }
 
+/* Continuation of the same bullet point (multi-paragraph <li>) — no marker */
+.jr-popup-context-list .jr-li-cont {
+  list-style-type: none;
+}
+
+/* Nested list depth levels — indentation + marker style */
+.jr-popup-context-list .jr-depth-1 {
+  margin-left: 1.2em;
+}
+
+.jr-popup-context-list .jr-depth-2 {
+  margin-left: 2.4em;
+}
+
+ul.jr-popup-context-list .jr-depth-1 {
+  list-style-type: circle;
+}
+
+ul.jr-popup-context-list .jr-depth-2 {
+  list-style-type: square;
+}
+
+ol.jr-popup-context-list .jr-depth-1 {
+  list-style-type: lower-alpha;
+}
+
+ol.jr-popup-context-list .jr-depth-2 {
+  list-style-type: lower-roman;
+}
+
+/* Block-level context for paragraphs, headings, and mixed content */
+.jr-popup-context-block {
+  margin-bottom: 6px;
+}
+
+.jr-popup-context-block:last-child {
+  margin-bottom: 0;
+}
+
+.jr-popup-context-heading {
+  font-weight: 600;
+  color: var(--jr-text);
+}
+
 /* Inline highlight mark for exact selection within the context */
 .jr-popup-mark {
   background: var(--jr-mark-bg);
   border-radius: 2px;
   padding: 1px 0;
+}
+
+/* Citation pill — boxed inline reference mirroring ChatGPT's citation style */
+.jr-popup-pill {
+  display: inline;
+  padding: 1px 5px;
+  border: 1px solid var(--jr-border);
+  border-radius: 4px;
+  font-size: 0.85em;
+  background: var(--jr-highlight-bg);
 }
 
 /* Input row */
@@ -205,6 +266,8 @@ html[class*="dark"] {
 .jr-source-highlight {
   background: var(--jr-mark-bg);
   border-radius: 2px;
+  user-select: text;
+  cursor: pointer;
 }
 
 /* Completed highlight — stays visible after popup dismiss, clickable to re-open */
@@ -235,4 +298,130 @@ html[class*="dark"] {
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+  user-select: text;
+}
+
+/* --- Markdown formatting inside popup response (Step 5b) --- */
+
+.jr-popup-response p {
+  margin: 0 0 1em 0;
+}
+
+.jr-popup-response p:last-child {
+  margin-bottom: 0;
+}
+
+.jr-popup-response h1,
+.jr-popup-response h2,
+.jr-popup-response h3,
+.jr-popup-response h4,
+.jr-popup-response h5,
+.jr-popup-response h6 {
+  margin: 1.25em 0 0.5em 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.jr-popup-response h1:first-child,
+.jr-popup-response h2:first-child,
+.jr-popup-response h3:first-child,
+.jr-popup-response h4:first-child,
+.jr-popup-response h5:first-child,
+.jr-popup-response h6:first-child {
+  margin-top: 0;
+}
+
+.jr-popup-response hr {
+  border: none;
+  border-top: 1px solid var(--jr-border);
+  margin: 1em 0;
+}
+
+.jr-popup-response pre {
+  background: var(--jr-highlight-bg);
+  border: 1px solid var(--jr-border);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 1em 0;
+}
+
+.jr-popup-response pre:last-child {
+  margin-bottom: 0;
+}
+
+.jr-popup-response code {
+  background: var(--jr-highlight-bg);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 0.9em;
+}
+
+.jr-popup-response pre code {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+.jr-popup-response blockquote {
+  margin: 1em 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--jr-highlight-border);
+  background: var(--jr-highlight-bg);
+  border-radius: 0 6px 6px 0;
+  color: var(--jr-text-muted);
+}
+
+.jr-popup-response ul,
+.jr-popup-response ol {
+  margin: 1em 0;
+  padding-left: 1.5em;
+}
+
+.jr-popup-response ul {
+  list-style-type: disc;
+}
+
+.jr-popup-response ol {
+  list-style-type: decimal;
+}
+
+.jr-popup-response li {
+  margin-bottom: 0.25em;
+}
+
+.jr-popup-response li:last-child {
+  margin-bottom: 0;
+}
+
+.jr-popup-response table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 13px;
+}
+
+.jr-popup-response th,
+.jr-popup-response td {
+  border: 1px solid var(--jr-border);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.jr-popup-response th {
+  background: var(--jr-highlight-bg);
+  font-weight: 600;
+}
+
+.jr-popup-response a {
+  color: var(--jr-accent);
+  text-decoration: underline;
+}
+
+.jr-popup-response img {
+  max-width: 100%;
+  height: auto;
 }
