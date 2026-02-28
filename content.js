@@ -7,6 +7,7 @@
   // --- Selection listener ---
 
   function handleSelectionChange() {
+    if (st.confirmingDelete) return;
     JR.removeAllPopups();
     var result = JR.getSelectedTextInAIResponse();
     if (!result) return;
@@ -32,6 +33,7 @@
 
   document.addEventListener("mousedown", function (e) {
     if (!st.activePopup && st.popupStack.length === 0) return;
+    if (st.confirmingDelete) return;
     if (st.hoverToolbar && st.hoverToolbar.contains(e.target)) return;
     var hlSpan = e.target.closest(".jr-source-highlight");
     if (hlSpan) {
@@ -46,6 +48,7 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && st.activePopup) {
+      if (st.confirmingDelete) return;
       JR.removePopup();
     }
   });

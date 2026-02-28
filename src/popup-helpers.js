@@ -266,6 +266,42 @@
   };
 
   /**
+   * Get the bounding rect of just the first or last line of highlight spans.
+   * Spans on the same line share a similar top value (within 4px tolerance).
+   */
+  JR.getAdjacentLineRect = function (spans, direction) {
+    if (!spans || spans.length === 0) return null;
+    var rects = [];
+    for (var i = 0; i < spans.length; i++) {
+      var r = spans[i].getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      rects.push(r);
+    }
+    if (rects.length === 0) return null;
+    // Sort by top position
+    rects.sort(function (a, b) { return a.top - b.top; });
+    var refTop;
+    if (direction === "above") {
+      // Popup is above → adjacent line is the first (topmost) line
+      refTop = rects[0].top;
+    } else {
+      // Popup is below → adjacent line is the last (bottommost) line
+      refTop = rects[rects.length - 1].top;
+    }
+    // Collect all rects on the same line (within 4px tolerance)
+    var top = Infinity, left = Infinity, bottom = -Infinity, right = -Infinity;
+    for (var j = 0; j < rects.length; j++) {
+      if (Math.abs(rects[j].top - refTop) <= 4) {
+        if (rects[j].top < top) top = rects[j].top;
+        if (rects[j].left < left) left = rects[j].left;
+        if (rects[j].bottom > bottom) bottom = rects[j].bottom;
+        if (rects[j].right > right) right = rects[j].right;
+      }
+    }
+    return { top: top, left: left, bottom: bottom, right: right, width: right - left, height: bottom - top };
+  };
+
+  /**
    * Update (or create) the arrow element on a popup, pointing toward the highlight.
    * @param {HTMLElement} popup
    * @param {DOMRect} highlightRect — bounding rect of the source highlight (viewport coords)
@@ -297,7 +333,7 @@
    * Position the popup inside the content container.
    * Uses position: absolute relative to the container.
    */
-  JR.positionPopup = function (popup, rect, contentContainer, forceDirection) {
+  JR.positionPopup = function (popup, rect, contentContainer, forceDirection, spans) {
     var containerRect = contentContainer.getBoundingClientRect();
     var gap = 8;
 
@@ -307,10 +343,7 @@
     var popupW = popup.offsetWidth;
     var popupH = popup.offsetHeight;
 
-    var left = rect.left - containerRect.left + rect.width / 2 - popupW / 2;
-    var top;
     var direction;
-
     if (forceDirection === "above" || forceDirection === "below") {
       direction = forceDirection;
     } else {
@@ -318,6 +351,14 @@
     }
     popup._jrLockedDirection = direction;
 
+    // Use the adjacent line's rect for horizontal centering and arrow
+    var adjRect = (spans && spans.length > 0)
+      ? JR.getAdjacentLineRect(spans, direction)
+      : null;
+    var centerRect = adjRect || rect;
+
+    var left = centerRect.left - containerRect.left + centerRect.width / 2 - popupW / 2;
+    var top;
     if (direction === "above") {
       top = rect.top - containerRect.top - popupH - gap;
     } else {
@@ -330,7 +371,7 @@
     popup.style.left = left + "px";
     popup.style.top = top + "px";
     popup._jrDirection = direction;
-    JR.updateArrow(popup, rect, containerRect, left);
+    JR.updateArrow(popup, centerRect, containerRect, left);
   };
 
   /**
@@ -346,7 +387,12 @@
     var popupH = st.activePopup.offsetHeight;
     var gap = 8;
     var direction = st.activePopup._jrLockedDirection || JR.bestDirection(rect, popupH, gap);
-    var left = rect.left - containerRect.left + rect.width / 2 - popupW / 2;
+
+    // Center on the adjacent line's highlight, not the full multi-line rect
+    var adjRect = JR.getAdjacentLineRect(st.activeSourceHighlights, direction);
+    var centerRect = adjRect || rect;
+
+    var left = centerRect.left - containerRect.left + centerRect.width / 2 - popupW / 2;
     var containerW = contentContainer.clientWidth;
     left = Math.max(8, Math.min(left, containerW - popupW - 8));
     var top;
@@ -358,7 +404,7 @@
     st.activePopup.style.left = left + "px";
     st.activePopup.style.top = top + "px";
     st.activePopup._jrDirection = direction;
-    JR.updateArrow(st.activePopup, rect, containerRect, left);
+    JR.updateArrow(st.activePopup, centerRect, containerRect, left);
     // Reposition floating toolbar if present
     if (st.hoverToolbar && st.activeSourceHighlights.length > 0) {
       JR.positionToolbar(st.hoverToolbar, st.activeSourceHighlights);
@@ -416,7 +462,9 @@
         popup.style.width = newWidth + "px";
         popup.style.left = newLeft + "px";
         if (st.activeSourceHighlights.length > 0 && popup.parentElement) {
-          var hRect = JR.getHighlightRect(st.activeSourceHighlights);
+          var dir = popup._jrLockedDirection || popup._jrDirection;
+          var adjR = JR.getAdjacentLineRect(st.activeSourceHighlights, dir);
+          var hRect = adjR || JR.getHighlightRect(st.activeSourceHighlights);
           var cRect = popup.parentElement.getBoundingClientRect();
           JR.updateArrow(popup, hRect, cRect, newLeft);
         }

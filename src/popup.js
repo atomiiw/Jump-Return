@@ -245,7 +245,7 @@
       st.confirmingDelete = true;
       // If popup is already open for this highlight, show confirmation there
       if (st.activePopup && st.activeHighlightId === hlId) {
-        showDeleteConfirmation(st.activePopup, hlId, entry);
+        showDeleteConfirmation(st.activePopup, hlId, entry, true);
       } else {
         // Open popup for this highlight, then show confirmation
         // Check if this is a chained highlight inside a parent popup
@@ -257,7 +257,7 @@
         }
         JR.createPopup({ completedId: hlId });
         if (st.activePopup) {
-          showDeleteConfirmation(st.activePopup, hlId, entry);
+          showDeleteConfirmation(st.activePopup, hlId, entry, false);
         }
       }
     });
@@ -365,32 +365,46 @@
     var toolbarH = toolbar.offsetHeight;
     var gap = 4;
 
-    // Center horizontally over highlight
-    var left = hlRect.left - cRect.left + hlRect.width / 2 - toolbarW / 2;
-    var cW = contentContainer.clientWidth;
-    left = Math.max(4, Math.min(left, cW - toolbarW - 4));
-
     // Determine which side: opposite of popup if open for THIS highlight, else above
     var popupDirection = null;
     if (st.activeHighlightId === st.hoverToolbarHlId && st.activePopup && st.activePopup._jrDirection) {
       popupDirection = st.activePopup._jrDirection;
     }
 
-    var top;
+    // Toolbar side determines which line is adjacent
+    // toolbar goes opposite the popup, so it's adjacent to the same line as the popup
+    var toolbarSide; // side where toolbar goes
     if (popupDirection === "below") {
-      top = hlRect.top - cRect.top - toolbarH - gap;
+      toolbarSide = "above";
     } else if (popupDirection === "above") {
-      top = hlRect.bottom - cRect.top + gap;
+      toolbarSide = "below";
     } else {
-      // No popup — default to above
-      top = hlRect.top - cRect.top - toolbarH - gap;
+      toolbarSide = "above";
+    }
+
+    // Get the rect of the line adjacent to the popup (same line toolbar is near)
+    // When popup is above → adjacent is first line → toolbar below first line
+    // When popup is below → adjacent is last line → toolbar above last line
+    var adjLineRect = JR.getAdjacentLineRect(spans, popupDirection || "above");
+    var lineRect = adjLineRect || hlRect;
+
+    // Center horizontally over the adjacent line's highlight
+    var left = lineRect.left - cRect.left + lineRect.width / 2 - toolbarW / 2;
+    var cW = contentContainer.clientWidth;
+    left = Math.max(4, Math.min(left, cW - toolbarW - 4));
+
+    var top;
+    if (toolbarSide === "below") {
+      top = lineRect.bottom - cRect.top + gap;
+    } else {
+      top = lineRect.top - cRect.top - toolbarH - gap;
     }
 
     toolbar.style.left = left + "px";
     toolbar.style.top = top + "px";
   };
 
-  function showDeleteConfirmation(popup, hlId, entry) {
+  function showDeleteConfirmation(popup, hlId, entry, hadPopupOpen) {
     JR.hideToolbar();
 
     var originalChildren = [];
@@ -421,12 +435,17 @@
       cancelBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
         st.confirmingDelete = false;
-        while (popup.firstChild) popup.removeChild(popup.firstChild);
-        for (var i = 0; i < originalChildren.length; i++) {
-          popup.appendChild(originalChildren[i]);
+        if (hadPopupOpen) {
+          // Restore the popup content
+          while (popup.firstChild) popup.removeChild(popup.firstChild);
+          for (var i = 0; i < originalChildren.length; i++) {
+            popup.appendChild(originalChildren[i]);
+          }
+          JR.repositionPopup();
+        } else {
+          // No popup was open before — just close everything
+          JR.removeAllPopups();
         }
-        JR.repositionPopup();
-        JR.showToolbar(hlId);
       });
 
       var deleteBtn = document.createElement("button");
@@ -937,7 +956,7 @@
     var parentDirection = (st.popupStack.length > 0)
       ? st.popupStack[st.popupStack.length - 1].popup._jrDirection
       : null;
-    JR.positionPopup(popup, posRect, contentContainer, isChained ? parentDirection : null);
+    JR.positionPopup(popup, posRect, contentContainer, isChained ? parentDirection : null, spans);
     JR.addResizeHandlers(popup);
 
     // --- Register active state ---
