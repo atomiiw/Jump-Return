@@ -5,7 +5,7 @@
   var S = JR.SELECTORS;
   var st = JR.state;
 
-  var CHEVRON_RIGHT_SVG = '<svg class="jr-question-chevron" viewBox="0 0 256 256" fill="currentColor"><path d="M181.66,133.66l-80,80A8,8,0,0,1,88,208V48a8,8,0,0,1,13.66-5.66l80,80A8,8,0,0,1,181.66,133.66Z"/></svg>';
+  var CHEVRON_RIGHT_SVG = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M181.66,133.66l-80,80A8,8,0,0,1,88,208V48a8,8,0,0,1,13.66-5.66l80,80A8,8,0,0,1,181.66,133.66Z"/></svg>';
 
   var SWITCH_SVG = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M228,48V96a12,12,0,0,1-12,12H168a12,12,0,0,1,0-24h19l-7.8-7.8a75.55,75.55,0,0,0-53.32-22.26h-.43A75.49,75.49,0,0,0,72.39,75.57,12,12,0,1,1,55.61,58.41a99.38,99.38,0,0,1,69.87-28.47H126A99.42,99.42,0,0,1,196.2,59.23L204,67V48a12,12,0,0,1,24,0ZM183.61,180.43a75.49,75.49,0,0,1-53.09,21.63h-.43A75.55,75.55,0,0,1,76.77,179.8L69,172H88a12,12,0,0,0,0-24H40a12,12,0,0,0-12,12v48a12,12,0,0,0,24,0V189l7.8,7.8A99.42,99.42,0,0,0,130,226.06h.56a99.38,99.38,0,0,0,69.87-28.47,12,12,0,0,0-16.78-17.16Z"/></svg>';
 
@@ -230,6 +230,14 @@
     var questionDiv = document.createElement("div");
     questionDiv.className = "jr-popup-question";
 
+    var inputInner = document.createElement("div");
+    inputInner.className = "jr-popup-question-inner";
+
+    var inputChevron = document.createElement("span");
+    inputChevron.className = "jr-popup-question-chevron";
+    inputChevron.innerHTML = CHEVRON_RIGHT_SVG;
+    inputInner.appendChild(inputChevron);
+
     var questionText = document.createElement("span");
     questionText.className = "jr-popup-question-text";
     questionText.contentEditable = "true";
@@ -239,7 +247,8 @@
       var text = (e.clipboardData || window.clipboardData).getData("text/plain");
       document.execCommand("insertText", false, text);
     });
-    questionDiv.appendChild(questionText);
+    inputInner.appendChild(questionText);
+    questionDiv.appendChild(inputInner);
 
     // Send wrapper with click-to-send + switch mode button
     var sendWrapper = document.createElement("div");
@@ -298,7 +307,17 @@
       // Re-add as non-editable question display
       var displayDiv = document.createElement("div");
       displayDiv.className = "jr-popup-question";
-      displayDiv.textContent = question;
+      var displayInner = document.createElement("div");
+      displayInner.className = "jr-popup-question-inner";
+      var displayChevron = document.createElement("span");
+      displayChevron.className = "jr-popup-question-chevron";
+      displayChevron.innerHTML = CHEVRON_RIGHT_SVG;
+      displayInner.appendChild(displayChevron);
+      var displayText = document.createElement("span");
+      displayText.className = "jr-popup-question-text";
+      displayText.textContent = question;
+      displayInner.appendChild(displayText);
+      displayDiv.appendChild(displayInner);
       var loadingDiv = JR.createLoadingDiv();
       container.appendChild(displayDiv);
       popup.appendChild(loadingDiv);
@@ -564,12 +583,13 @@
     if (st.activePopup) st.activePopup.classList.add("jr-popup-disabled");
 
     countDescendants(hlId).then(function (count) {
+      var total = count + 1;
       var confirmEl = document.createElement("div");
       confirmEl.className = "jr-popup-confirm jr-popup-toolbar";
 
       var text = document.createElement("div");
       text.className = "jr-popup-confirm-text";
-      text.textContent = "Delete?";
+      text.textContent = "Delete " + total + " follow-up" + (total === 1 ? "" : "s") + "?";
       confirmEl.appendChild(text);
 
       var cancelBtn = document.createElement("button");
@@ -863,6 +883,14 @@
       var questionDiv = document.createElement("div");
       questionDiv.className = "jr-popup-question jr-popup-question--editable";
 
+      var questionInner = document.createElement("div");
+      questionInner.className = "jr-popup-question-inner";
+
+      var chevronSpan = document.createElement("span");
+      chevronSpan.className = "jr-popup-question-chevron";
+      chevronSpan.innerHTML = CHEVRON_RIGHT_SVG;
+      questionInner.appendChild(chevronSpan);
+
       var questionText = document.createElement("span");
       questionText.className = "jr-popup-question-text";
       questionText.textContent = entry.question;
@@ -871,7 +899,8 @@
         var t = (e.clipboardData || window.clipboardData).getData("text/plain");
         document.execCommand("insertText", false, t);
       });
-      questionDiv.appendChild(questionText);
+      questionInner.appendChild(questionText);
+      questionDiv.appendChild(questionInner);
 
       // Right-side controls container
       var controlsDiv = document.createElement("div");
@@ -911,8 +940,24 @@
 
       var editing = false;
       var originalText = entry.question;
+      var lastCaretRange = null;
 
-      function enterEditMode() {
+      // Track caret position on mousemove for click-to-edit placement
+      questionText.addEventListener("mousemove", function (e) {
+        if (editing || st.cancelResponseWatch) { lastCaretRange = null; return; }
+        var caretRange = document.caretRangeFromPoint(e.clientX, e.clientY);
+        if (!caretRange || !questionText.contains(caretRange.startContainer)) {
+          lastCaretRange = null;
+          return;
+        }
+        lastCaretRange = caretRange;
+      });
+
+      questionText.addEventListener("mouseleave", function () {
+        lastCaretRange = null;
+      });
+
+      function enterEditMode(clickEvent) {
         if (editing) return;
         // Block editing while a response is still generating
         if (st.cancelResponseWatch) return;
@@ -921,12 +966,29 @@
         questionDiv.classList.add("jr-popup-question--editing");
         questionText.contentEditable = "true";
         questionText.focus();
+        // Place caret at click position if available
         var sel = window.getSelection();
-        var range = document.createRange();
-        range.selectNodeContents(questionText);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
+        if (clickEvent && lastCaretRange) {
+          var range = document.createRange();
+          try {
+            range.setStart(lastCaretRange.startContainer, lastCaretRange.startOffset);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } catch (ex) {
+            range.selectNodeContents(questionText);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        } else {
+          var range = document.createRange();
+          range.selectNodeContents(questionText);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        lastCaretRange = null;
         if (versionNav) versionNav.style.display = "none";
         sendWrapper.style.display = "";
         sendBtn.disabled = true;
@@ -946,11 +1008,11 @@
         switchBtn.classList.add("jr-disabled");
       }
 
-      // Click on question text → enter edit mode
+      // Click on question text → enter edit mode at click position
       questionText.addEventListener("click", function (e) {
         if (!editing) {
           e.stopPropagation();
-          enterEditMode();
+          enterEditMode(e);
         }
       });
 
@@ -1089,7 +1151,7 @@
     var w = isChained ? st.customPopupWidthChained : st.customPopupWidthL1;
     if (w) popup.style.width = w + "px";
 
-    // --- Upper section (dark card: quote + question + version nav) ---
+    // --- Upper card (highlight + question) ---
     var upper = document.createElement("div");
     upper.className = "jr-popup-upper";
     popup.appendChild(upper);
@@ -1211,7 +1273,7 @@
     var entry = st.completedHighlights.get(hlId);
     if (!entry) return;
 
-    // Find the upper card and remove question/version nav from it
+    // Find the upper card and strip question/version nav from it
     var upper = popup.querySelector(".jr-popup-upper");
     if (upper) {
       var questionDiv = upper.querySelector(".jr-popup-question");
@@ -1220,9 +1282,7 @@
       if (versionNav) versionNav.remove();
     }
 
-    // Remove response, loading divs from upper (and any stray ones on popup)
-    if (upper) {
-    }
+    // Remove response and loading divs from popup (outside upper)
     var children = Array.from(popup.children);
     for (var i = 0; i < children.length; i++) {
       var cl = children[i].classList;

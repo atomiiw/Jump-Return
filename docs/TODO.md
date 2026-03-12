@@ -177,9 +177,41 @@ Work through these steps **in order**. Do not skip ahead or add features from la
 - Current position indicator (e.g. "2 / 5") shows which highlight is focused
 - Clicking an arrow scrolls to the highlight and opens its popup
 
-## Step 8: Multi-Site Support
-- Abstract site-specific selectors and injection logic behind a config/adapter pattern
-- Add support for Claude (claude.ai)
-- Add support for Gemini (gemini.google.com)
-- Add support for Microsoft Copilot (copilot.microsoft.com)
-- Test each site end-to-end
+## Step 8: Debugging & Polish
+
+### Step 8a: Remove Multi-Site Scaffolding
+- Strip out any multi-site adapter/config code and leave only ChatGPT support
+- Clean up selectors, injection logic, and any branching that references Claude, Gemini, or Copilot
+
+### Step 8b: Right-Side Popup Placement
+- Support placing the popup on the right side of the highlight (not only left)
+- Automatically choose whichever side has more room; allow the user to toggle if needed
+
+### Step 8c: Cmd+F Search Through Hidden Content
+- Ensure that popup content (questions and responses) that has been wrapped and hidden from the main chat is still discoverable via the browser's Cmd+F / Ctrl+F search
+- Audit all hidden turns and popup HTML to confirm nothing is lost to find-in-page
+
+### Step 8d: Nav Widget Should Not Count Unsent Highlights
+- The highlight navigation widget currently increments the count (e.g. shows "1/5") as soon as a new highlight is created for a question that hasn't been sent yet
+- The nav widget should only count completed highlights — an unsent/in-progress highlight should not appear in the count or be navigable
+- Fix: filter out highlights that don't have a completed response when building the nav list
+
+### Step 8e: Delete Confirmation Bar Refinements
+- Move the cancel text slightly rightward
+- Make the confirm/cancel icons smaller
+- Replace the red-outline cancel indicator with a fog/opaque white overlay that covers everything except the cancel button, making it clear that cancel is the only clickable action
+
+### Step 8f: Export Highlights as Notes
+- Add an export function where users can export their highlighted questions and responses as structured notes (e.g. markdown or plain text)
+- Accessible from the extension popup or a toolbar button
+- Not urgent — lower priority than other polish items
+
+### Step 8g: Disable Extension Toggle
+- Add a small ✕ button (floating or in the nav widget) that lets the user disable Jump Return on the current page without uninstalling
+- When disabled, all JR event listeners, popups, highlights, and UI are suppressed — ChatGPT behaves as normal
+- Clicking again (or reloading) re-enables it
+- Persist the enabled/disabled state per tab or globally via `chrome.storage.local`
+
+### Step 8h: Logo & Description for Public Release
+- Design/decorate the extension logo for the Chrome Web Store
+- Write a polished store description and screenshots for public listing

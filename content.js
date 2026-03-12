@@ -97,6 +97,12 @@
   var hoverUnderlines = [];
   var hoveredHlId = null;
   var activeUnderlines = [];
+  var lastMouseX = 0;
+  var lastMouseY = 0;
+  document.addEventListener("mousemove", function (e) {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+  }, true);
 
   function removeElems(arr) {
     for (var i = 0; i < arr.length; i++) arr[i].remove();
@@ -112,9 +118,28 @@
     if (!entry || !entry.spans || entry.spans.length === 0) return elems;
 
     var allRects = [];
+    var hlId = entry.spans[0].getAttribute("data-jr-highlight-id");
     for (var i = 0; i < entry.spans.length; i++) {
-      var rects = entry.spans[i].getClientRects();
-      for (var r = 0; r < rects.length; r++) allRects.push(rects[r]);
+      var span = entry.spans[i];
+      var range = document.createRange();
+      range.selectNodeContents(span);
+      var rRects = range.getClientRects();
+      for (var r = 0; r < rRects.length; r++) allRects.push(rRects[r]);
+
+      // If there's a next span, collect rects from any inner highlight spans
+      // sitting between this span and the next (wrapping case).
+      if (i < entry.spans.length - 1) {
+        var sib = span.nextElementSibling;
+        while (sib && sib !== entry.spans[i + 1]) {
+          if (sib.classList.contains("jr-source-highlight-done")) {
+            var innerRange = document.createRange();
+            innerRange.selectNodeContents(sib);
+            var iRects = innerRange.getClientRects();
+            for (var ir = 0; ir < iRects.length; ir++) allRects.push(iRects[ir]);
+          }
+          sib = sib.nextElementSibling;
+        }
+      }
     }
     if (allRects.length === 0) return elems;
 
@@ -125,7 +150,7 @@
       if (rect.width === 0 && rect.height === 0) continue;
       var found = false;
       for (var li = 0; li < lines.length; li++) {
-        if (Math.abs(lines[li].bottom - rect.bottom) < 4) {
+        if (Math.abs(lines[li].bottom - rect.bottom) < 8) {
           lines[li].left = Math.min(lines[li].left, rect.left);
           lines[li].right = Math.max(lines[li].right, rect.right);
           found = true;
@@ -200,6 +225,22 @@
     removeElems(hoverUnderlines);
     hoveredHlId = null;
   });
+
+  // On scroll, check if mouse is still over the hovered highlight — remove underline if not
+  document.addEventListener("scroll", function () {
+    if (!hoveredHlId) return;
+    var entry = st.completedHighlights.get(hoveredHlId);
+    if (!entry || !entry.spans || entry.spans.length === 0) {
+      removeElems(hoverUnderlines);
+      hoveredHlId = null;
+      return;
+    }
+    var elUnder = document.elementFromPoint(lastMouseX, lastMouseY);
+    if (!elUnder || !elUnder.closest || !elUnder.closest(".jr-source-highlight-done[data-jr-highlight-id=\"" + hoveredHlId + "\"]")) {
+      removeElems(hoverUnderlines);
+      hoveredHlId = null;
+    }
+  }, true);
 
   // Active underline — shown while popup is open
   JR.showActiveUnderline = function (hlId) {

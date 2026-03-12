@@ -325,9 +325,12 @@
       arrow.className = "jr-popup-arrow";
       popup.appendChild(arrow);
     }
-    arrow.classList.remove("jr-popup-arrow--up", "jr-popup-arrow--down");
+    arrow.classList.remove("jr-popup-arrow--up", "jr-popup-arrow--down", "jr-popup-arrow--lower");
     if (popup._jrDirection === "above") {
       arrow.classList.add("jr-popup-arrow--down");
+      // Down arrow touches whichever card is at the bottom
+      var hasLower = popup.querySelector(".jr-popup-response, .jr-popup-loading");
+      if (hasLower) arrow.classList.add("jr-popup-arrow--lower");
     } else {
       arrow.classList.add("jr-popup-arrow--up");
     }

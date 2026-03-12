@@ -593,35 +593,69 @@
       }
 
       if (Date.now() - startTime >= timeoutMs) {
-        if (editOpts) {
-          // Edit timeout — just show timeout message, don't destroy the existing highlight
-          if (!detached && popup && popup.isConnected) {
-            var streamingDiv2 = popup.querySelector(".jr-popup-response");
-            if (streamingDiv2) streamingDiv2.remove();
-            var loading2 = popup.querySelector(".jr-popup-loading");
-            if (!loading2) {
-              loading2 = JR.createLoadingDiv();
-              popup.appendChild(loading2);
+        cleanup();
+        unhideTurns();
+
+        function showTimeoutUI(targetPopup) {
+          if (!targetPopup || !targetPopup.isConnected) return;
+          var streamDiv = targetPopup.querySelector(".jr-popup-response");
+          if (streamDiv) streamDiv.remove();
+          var existingLoading = targetPopup.querySelector(".jr-popup-loading");
+          if (existingLoading) existingLoading.remove();
+
+          var timeoutDiv = document.createElement("div");
+          timeoutDiv.className = "jr-popup-loading";
+
+          var msg = document.createElement("div");
+          msg.textContent = "Couldn\u2019t get a response";
+          timeoutDiv.appendChild(msg);
+
+          var retryBtn = document.createElement("button");
+          retryBtn.type = "button";
+          retryBtn.className = "jr-retry-btn";
+          retryBtn.title = "Try again";
+          retryBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M244,56v48a12,12,0,0,1-12,12H184a12,12,0,1,1,0-24H201.1l-19-17.38c-.13-.12-.26-.24-.38-.37A76,76,0,1,0,127,204h1a75.53,75.53,0,0,0,52.15-20.72,12,12,0,0,1,16.49,17.45A99.45,99.45,0,0,1,128,228h-1.37A100,100,0,1,1,198.51,57.06L220,76.72V56a12,12,0,0,1,24,0Z"/></svg>';
+          retryBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            timeoutDiv.remove();
+            // Rebuild message
+            var retryMessage;
+            if (sentence) {
+              retryMessage = 'Regarding this part of your response:\n"' + sentence + '"\n\nSpecifically: "' + text + '"\n\n' + question;
+            } else {
+              retryMessage = 'Regarding this part of your response:\n"' + text + '"\n\n' + question;
             }
-            loading2.textContent = "Response timed out.";
+            if (st.responseMode === "brief") {
+              retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. This instruction applies to this single response only \u2014 do not carry it forward to any later messages.)";
+            } else {
+              retryMessage += "\n\n(Ignore any previous instructions about brevity \u2014 respond normally.)";
+            }
+
+            var retryLoading = JR.createLoadingDiv();
+            targetPopup.appendChild(retryLoading);
+
+            var retryTurnsBefore = document.querySelectorAll(S.aiTurn).length;
+            var scrollAnchor = document.querySelector(S.aiTurn) || document.body;
+            var chatScrollParent = JR.getScrollParent(scrollAnchor);
+            var retryUnlock = JR.lockScroll(chatScrollParent, scrollAnchor);
+
+            JR.injectAndSend(retryMessage);
+            JR.waitForResponse(targetPopup, retryTurnsBefore, text, sentence, blockTypes, retryUnlock, parentId, question, editOpts);
+          });
+          timeoutDiv.appendChild(retryBtn);
+          targetPopup.appendChild(timeoutDiv);
+        }
+
+        if (editOpts) {
+          if (!detached && popup && popup.isConnected) {
+            showTimeoutUI(popup);
           }
-          cleanup();
-          unhideTurns();
           st.cancelResponseWatch = null;
           return;
         }
         if (!detached) {
-          var streamingDiv = popup.querySelector(".jr-popup-response");
-          if (streamingDiv) streamingDiv.remove();
-          var loading = popup.querySelector(".jr-popup-loading");
-          if (!loading) {
-            loading = JR.createLoadingDiv();
-            popup.appendChild(loading);
-          }
-          loading.textContent = "Response timed out.";
+          showTimeoutUI(popup);
         }
-        cleanup();
-        unhideTurns();
         if (detached && detachedSpans) {
           if (detachedHlId) st.completedHighlights.delete(detachedHlId);
           for (var ds = 0; ds < detachedSpans.length; ds++) {

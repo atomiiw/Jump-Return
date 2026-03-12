@@ -68,7 +68,7 @@ html[class*="dark"] {
   --jr-color-purple-active: #e63020;
 }
 
-/* Popup container */
+/* Popup container — transparent shell, children are the visible cards */
 .jr-popup {
   position: absolute;
   z-index: 50;
@@ -90,19 +90,10 @@ html[class*="dark"] {
 
 .jr-popup-upper {
   background: var(--jr-bg);
+  border: 1px solid var(--jr-border);
   border-radius: var(--jr-radius);
   box-shadow: var(--jr-shadow);
-  border: 1px solid var(--jr-border);
   padding: 14px;
-}
-
-.jr-popup-lower {
-  background: var(--jr-bg);
-  border-radius: var(--jr-radius);
-  box-shadow: var(--jr-shadow);
-  border: 1px solid var(--jr-border);
-  padding: 14px;
-  margin-top: 6px;
 }
 
 /* Arrow pointing from popup to source highlight */
@@ -161,6 +152,7 @@ html[class*="dark"] {
   border-top: 10px solid var(--jr-bg);
 }
 
+
 @keyframes jr-fade-in {
   from {
     opacity: 0;
@@ -207,7 +199,7 @@ html[class*="dark"] {
   mask-size: contain;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
-  background-color: #191414;
+  background-color: #919797;
 }
 
 /* Bullet list for multi-block context (selections across list items) */
@@ -439,11 +431,10 @@ ol.jr-popup-context-list .jr-depth-2 {
 /* Hover underline — single continuous line positioned under the full highlight */
 .jr-highlight-underline {
   position: absolute;
-  height: 2px;
-  background: currentColor;
+  height: 1px;
+  background: #191414;
   pointer-events: none;
   z-index: 1;
-  opacity: 0.4;
 }
 
 
@@ -452,17 +443,45 @@ ol.jr-popup-context-list .jr-depth-2 {
   display: none !important;
 }
 
-/* Loading indicator inside popup */
+/* Loading indicator — lower card with overlapping border */
 .jr-popup-loading {
-  margin-top: 6px;
+  margin-top: -1px;
   padding: 14px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--jr-text-muted);
   background: var(--jr-bg);
+  border: 1px solid var(--jr-border);
   border-radius: var(--jr-radius);
   box-shadow: var(--jr-shadow);
-  border: 1px solid var(--jr-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--jr-text-muted);
+  min-height: 80px;
+}
+
+/* Retry button inside timeout loading div */
+.jr-retry-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 10px auto 0;
+  padding: 6px;
+  border: none;
+  background: none;
+  color: var(--jr-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.jr-retry-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.jr-retry-btn:hover {
+  color: var(--jr-text);
+  transform: scale(1.25);
 }
 
 /* Follow-up question shown between context and response */
@@ -476,10 +495,17 @@ ol.jr-popup-context-list .jr-depth-2 {
   word-break: break-word;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   background: none;
 }
 
+.jr-popup-question-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
 
 .jr-popup-question-chevron {
   flex-shrink: 0;
@@ -487,7 +513,9 @@ ol.jr-popup-context-list .jr-depth-2 {
   align-items: center;
   color: inherit;
   line-height: 1.6;
+  margin-left: -2px;
 }
+
 
 .jr-popup-question-chevron svg {
   width: 14px;
@@ -498,29 +526,26 @@ ol.jr-popup-context-list .jr-depth-2 {
   flex: 1;
   min-width: 0;
   word-break: break-word;
+  outline: none;
+  text-decoration: none;
+  cursor: text;
+  margin-left: 4px;
+  position: relative;
+  border: none;
   border-bottom: 1px solid transparent;
   padding-bottom: 2px;
   transition: border-color 0.15s ease;
-  outline: none;
 }
 
-/* Hover underline on any editable question text */
 .jr-popup-question-text:hover {
-  border-bottom-color: #9ea0a7;
+  border-bottom-color: #e5e5e5;
   cursor: text;
 }
 
-/* Focus underline (clicked into / typing) */
+.jr-popup-question--editing .jr-popup-question-text,
 .jr-popup-question-text:focus {
   border-bottom-color: #191414;
-  cursor: text;
-}
-
-/* Active editing underline (completed question in edit mode) */
-.jr-popup-question--editing .jr-popup-question-text,
-.jr-popup-question--editing .jr-popup-question-text:hover {
   outline: none;
-  border-bottom-color: #191414;
   cursor: text;
 }
 
@@ -576,7 +601,11 @@ ol.jr-popup-context-list .jr-depth-2 {
 .jr-edit-send-wrapper {
   position: relative;
   flex-shrink: 0;
+  width: 48px;
+  display: flex;
+  justify-content: center;
   margin-top: 2px;
+  margin-right: -2px;
 }
 
 /* Send icon */
@@ -678,8 +707,10 @@ ol.jr-popup-context-list .jr-depth-2 {
 .jr-popup-version-nav {
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 0;
   margin: 0;
+  margin-right: -2px;
   padding: 0;
   background: none;
 }
@@ -724,15 +755,14 @@ ol.jr-popup-context-list .jr-depth-2 {
   text-align: center;
 }
 
-/* AI response displayed inside popup */
+/* AI response — lower card with overlapping border */
 .jr-popup-response {
-  margin-top: 6px;
+  margin-top: -1px;
   padding: 14px;
-  border-top: none;
   background: var(--jr-bg);
+  border: 1px solid var(--jr-border);
   border-radius: var(--jr-radius);
   box-shadow: var(--jr-shadow);
-  border: 1px solid var(--jr-border);
   max-height: 350px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1110,7 +1140,7 @@ ol.jr-popup-context-list .jr-depth-2 {
 
 .jr-popup-confirm-text {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--jr-text);
   line-height: 1;
   white-space: nowrap;
@@ -1164,9 +1194,9 @@ ol.jr-popup-context-list .jr-depth-2 {
 
 /* Shine/flash animation when user clicks outside the delete confirmation */
 @keyframes jr-confirm-shine {
-  0% { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06); }
-  50% { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); }
-  100% { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06); }
+  0% { outline: 1px solid transparent; }
+  50% { outline: 1px solid #ef4444; }
+  100% { outline: 1px solid transparent; }
 }
 
 .jr-popup-confirm.jr-confirm-shine {
