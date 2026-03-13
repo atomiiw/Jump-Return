@@ -450,6 +450,8 @@
         attempts++;
 
         JR.updateNavWidget();
+        if (JR.stripHiddenTurnContent && !st.responseWatchActive) JR.stripHiddenTurnContent();
+        if (JR.buildSearchContainers) JR.buildSearchContainers();
 
         if ((remaining.length > 0 || turnsRemaining.length > 0) && attempts < maxAttempts) {
           st.restoreTimer = setTimeout(tryRestore, 500);

@@ -182,6 +182,7 @@
   };
 
   JR.waitForResponse = function (popup, turnsBefore, text, sentence, blockTypes, unlockScroll, parentId, question, editOpts) {
+    st.responseWatchActive = true;
     var startTime = Date.now();
     var timeoutMs = 100000; // 100 seconds
     var timerId = null;
@@ -196,11 +197,18 @@
     var streamDirty = false;
 
     function unhideTurns() {
-      if (questionTurn) questionTurn.classList.remove("jr-hidden");
-      if (responseTurn) responseTurn.classList.remove("jr-hidden");
+      if (questionTurn) {
+        if (JR.restoreHiddenTurnContent) JR.restoreHiddenTurnContent(questionTurn);
+        questionTurn.classList.remove("jr-hidden");
+      }
+      if (responseTurn) {
+        if (JR.restoreHiddenTurnContent) JR.restoreHiddenTurnContent(responseTurn);
+        responseTurn.classList.remove("jr-hidden");
+      }
     }
 
     function cleanup() {
+      st.responseWatchActive = false;
       if (streamObserver) {
         streamObserver.disconnect();
         streamObserver = null;
@@ -263,7 +271,11 @@
       // Auto-scroll to bottom during streaming
       responseDiv.scrollTop = responseDiv.scrollHeight;
 
-      if (isNew) JR.repositionPopup();
+      // Reposition "above" popups so the arrow stays anchored to the highlight
+      // (popup grows upward as content streams in)
+      if (targetPopup._jrLockedDirection === "above" || isNew) {
+        JR.repositionPopup();
+      }
     }
 
     /**
@@ -514,6 +526,8 @@
       });
 
       JR.updateNavWidget();
+      if (JR.stripHiddenTurnContent) JR.stripHiddenTurnContent();
+      if (JR.buildSearchContainers) JR.buildSearchContainers();
       st.cancelResponseWatch = null;
     }
 

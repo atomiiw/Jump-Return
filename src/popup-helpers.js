@@ -262,9 +262,30 @@
    * position and popup height. Prefers the side with more viewport space;
    * falls back to whichever side the popup actually fits.
    */
-  JR.bestDirection = function (highlightRect, popupH, gap) {
+  JR.bestDirection = function (highlightRect, popupH, gap, contentContainer) {
     var spaceBelow = window.innerHeight - highlightRect.bottom - gap;
     var spaceAbove = highlightRect.top - gap;
+
+    // Check scroll room: can the user actually scroll to see the popup?
+    // If the popup would open above but there's no scroll room above the
+    // highlight (it's near the top of the scrollable content), force below.
+    // Vice versa for below.
+    if (contentContainer) {
+      var scrollParent = JR.getScrollParent(contentContainer);
+      if (scrollParent && scrollParent !== document.documentElement) {
+        var containerRect = contentContainer.getBoundingClientRect();
+        // Absolute top the popup would land at inside the container
+        var aboveTop = highlightRect.top - containerRect.top - popupH - gap;
+        var belowBottom = highlightRect.bottom - containerRect.top + gap + popupH;
+        var scrollH = contentContainer.scrollHeight || contentContainer.offsetHeight;
+        var canScrollToAbove = aboveTop >= 0;
+        var canScrollToBelow = belowBottom <= scrollH + 200; // generous margin
+
+        if (!canScrollToAbove && canScrollToBelow) return "below";
+        if (!canScrollToBelow && canScrollToAbove) return "above";
+      }
+    }
+
     // Prefer the side with more room
     if (spaceBelow >= popupH && spaceAbove >= popupH) {
       return spaceBelow >= spaceAbove ? "below" : "above";
@@ -360,7 +381,7 @@
     if (forceDirection === "above" || forceDirection === "below") {
       direction = forceDirection;
     } else {
-      direction = JR.bestDirection(rect, popupH, gap);
+      direction = JR.bestDirection(rect, popupH, gap, contentContainer);
     }
     popup._jrLockedDirection = direction;
 
@@ -418,10 +439,6 @@
     st.activePopup.style.top = top + "px";
     st.activePopup._jrDirection = direction;
     JR.updateArrow(st.activePopup, centerRect, containerRect, left);
-    // Reposition floating toolbar if present
-    if (st.hoverToolbar && st.activeSourceHighlights.length > 0) {
-      JR.positionToolbar(st.hoverToolbar, st.activeSourceHighlights);
-    }
   };
 
   /**
@@ -440,6 +457,11 @@
 
     popup.addEventListener("mousemove", function (e) {
       if (popup._jrResizing) return;
+      // No resize cursor while streaming or during delete confirmation
+      if ((st.cancelResponseWatch && popup.querySelector(".jr-popup-response")) || st.confirmingDelete) {
+        popup.style.cursor = "";
+        return;
+      }
       popup.style.cursor = getEdge(e) ? "col-resize" : "";
     });
 
@@ -450,12 +472,19 @@
     popup.addEventListener("mousedown", function (e) {
       var edge = getEdge(e);
       if (!edge) return;
+      // Block resize while streaming or during delete confirmation
+      if ((st.cancelResponseWatch && popup.querySelector(".jr-popup-response")) || st.confirmingDelete) return;
       e.preventDefault();
 
       popup._jrResizing = true;
       var startX = e.clientX;
       var startWidth = popup.offsetWidth;
       var startLeft = parseFloat(popup.style.left) || 0;
+      var dir = popup._jrLockedDirection || popup._jrDirection;
+      // For "above" popups, anchor the bottom edge so the arrow doesn't move
+      var anchorBottom = (dir === "above")
+        ? (parseFloat(popup.style.top) || 0) + popup.offsetHeight
+        : null;
 
       // Compute the arrow's X position (relative to container) as the resize limit.
       // Left edge can't go right of arrow; right edge can't go left of arrow.
@@ -496,9 +525,13 @@
 
         popup.style.width = newWidth + "px";
         popup.style.left = newLeft + "px";
+        // For "above" popups, keep the bottom edge fixed so the arrow stays put
+        if (anchorBottom !== null) {
+          popup.style.top = (anchorBottom - popup.offsetHeight) + "px";
+        }
         if (st.activeSourceHighlights.length > 0 && popup.parentElement) {
-          var dir = popup._jrLockedDirection || popup._jrDirection;
-          var adjR = JR.getAdjacentLineRect(st.activeSourceHighlights, dir);
+          var curDir = popup._jrLockedDirection || popup._jrDirection;
+          var adjR = JR.getAdjacentLineRect(st.activeSourceHighlights, curDir);
           var hRect2 = adjR || JR.getHighlightRect(st.activeSourceHighlights);
           var cRect2 = popup.parentElement.getBoundingClientRect();
           JR.updateArrow(popup, hRect2, cRect2, newLeft);
@@ -624,7 +657,7 @@
   JR.getLevel1HighlightIds = function () {
     var items = [];
     st.completedHighlights.forEach(function (entry, id) {
-      if (!entry.parentId && entry.spans && entry.spans.length > 0 && entry.spans[0].isConnected) {
+      if (!entry.parentId && !entry._jrTemp && entry.spans && entry.spans.length > 0 && entry.spans[0].isConnected) {
         items.push({ id: id, span: entry.spans[0] });
       }
     });
@@ -817,7 +850,7 @@
    * @param {number} direction  -1 for previous (up), +1 for next (down)
    */
   JR.navigateHighlight = function (direction) {
-    if (st.confirmingDelete) { JR.shineDeleteConfirm(); return; }
+    if (st.confirmingDelete) return;
     if (!st.navWidget || !st.navWidget._jrIds) return;
     var ids = st.navWidget._jrIds;
     if (ids.length === 0) return;
@@ -862,6 +895,7 @@
    * Close all open popups (active + entire stack).
    */
   JR.removeAllPopups = function () {
+    st.confirmingDelete = false;
     while (st.activePopup || st.popupStack.length > 0) {
       JR.removePopup();
     }

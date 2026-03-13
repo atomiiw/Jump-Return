@@ -217,4 +217,4 @@
 - `position: fixed`, vertically centered, no background/border — just arrows and indicator
 
 ## Planned
-- **Multi-site support** (Step 8) — extend selectors and injection logic for Claude, Gemini, and Microsoft Copilot
+- **Debugging & polish** (Step 8) — right-side popup placement, Cmd+F through hidden content, delete confirmation refinements, nav widget fix, export highlights, disable toggle, public release prep

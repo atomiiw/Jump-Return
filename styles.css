@@ -84,9 +84,51 @@ html[class*="dark"] {
   animation: jr-fade-in 0.15s ease-out;
 }
 
-.jr-popup-disabled {
-  pointer-events: none;
+/* Disable × button — right side, vertically centered on "Ask ChatGPT" button */
+.jr-popup-disable-btn {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease;
 }
+
+.jr-popup-disable-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Tooltip — fixed on body, escapes all clipping */
+.jr-disable-tooltip {
+  position: fixed;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  pointer-events: none;
+  z-index: 2147483647;
+  font-family: var(--jr-font);
+}
+
+.jr-popup-disable-btn:hover {
+  color: rgba(0, 0, 0, 0.85);
+  transform: translateY(-50%) scale(1.2);
+}
+
+
 
 .jr-popup-upper {
   background: var(--jr-bg);
@@ -1025,26 +1067,23 @@ ol.jr-popup-context-list .jr-depth-2 {
   color: #fff;
 }
 
-/* --- Floating toolbar near highlight (Step 7a) --- */
+/* --- Inline color toolbar inside popup (above blockquote) --- */
 
 .jr-popup-toolbar {
-  position: absolute;
-  z-index: 50;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  cursor: pointer;
-  background: #ffffff;
-  border: 1px solid var(--jr-border);
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
-  animation: jr-fade-in 0.15s ease-out;
-  transition: opacity 0.12s ease-in;
+  padding: 0;
+  margin-bottom: 10px;
 }
 
-.jr-popup-toolbar.jr-toolbar-hiding {
-  opacity: 0;
+.jr-toolbar-inline {
+  position: static;
+  z-index: auto;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .jr-toolbar-swatch {
@@ -1125,32 +1164,22 @@ ol.jr-popup-context-list .jr-depth-2 {
   height: 16px;
 }
 
-/* Confirmation — toolbar-sized inline bar */
-.jr-popup-confirm {
+/* Delete confirmation — text + × + ✓ centered together */
+.jr-popup-delete-confirm {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  background: var(--jr-bg);
-  border: 1px solid var(--jr-border);
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
-  animation: none;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 14px;
 }
 
 .jr-popup-confirm-text {
   font-size: 14px;
   font-weight: 400;
   color: var(--jr-text);
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.jr-popup-confirm-buttons {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
+  line-height: 1.4;
+  text-align: center;
+  margin-right: 6px;
 }
 
 .jr-popup-confirm-icon-btn {
@@ -1166,8 +1195,8 @@ ol.jr-popup-context-list .jr-depth-2 {
 }
 
 .jr-popup-confirm-icon-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .jr-popup-confirm-icon-btn:hover {
@@ -1192,15 +1221,18 @@ ol.jr-popup-context-list .jr-depth-2 {
   transform: scale(1.35);
 }
 
-/* Shine/flash animation when user clicks outside the delete confirmation */
-@keyframes jr-confirm-shine {
-  0% { outline: 1px solid transparent; }
-  50% { outline: 1px solid #ef4444; }
-  100% { outline: 1px solid transparent; }
-}
+/* --- Search containers (Cmd+F) — visually hidden, only for text matching --- */
 
-.jr-popup-confirm.jr-confirm-shine {
-  animation: jr-confirm-shine 0.4s ease;
+.jr-search-popup {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin: -1px !important;
 }
 
 /* --- Highlight navigation widget (Step 7d) --- */

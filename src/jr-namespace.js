@@ -30,6 +30,7 @@
       activePopup: null,
       responseMode: "regular",          // "regular" or "brief"
       cancelResponseWatch: null,
+      responseWatchActive: false,       // true while waitForResponse is polling (including detached)
       activeSourceHighlights: [],       // wrapper <span> elements in the AI response
       resizeHandler: null,              // window resize listener
       completedHighlights: new Map(),   // id → { spans, responseHTML, text, sentence, contentContainer }
@@ -44,6 +45,7 @@
       hoverToolbarTimer: null,          // delayed hide timer
       confirmingDelete: false,          // true while delete confirmation is showing
       navWidget: null,                  // floating highlight navigation widget element
+      askBtnHidden: false,              // session flag — hides ChatGPT's native "Ask ChatGPT" button
     },
   };
 })();

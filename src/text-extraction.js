@@ -468,6 +468,37 @@
       }
     }
 
+    // Fallback: normalize all whitespace (spaces, tabs, nbsp) to single space
+    // and retry. Handles CJK text where selection.toString() may insert spaces
+    // at element boundaries that don't exist in DOM text nodes.
+    if (idx === -1) {
+      var wsNorm = function (s) { return s.replace(/[\s\u00a0]+/g, " ").trim(); };
+      var normFull = wsNorm(fullText);
+      var normSearch = wsNorm(searchText);
+      // Build position map from normalized to original
+      var wsMap = [];
+      var ni = 0;
+      for (var wi = 0; wi < fullText.length; wi++) {
+        if (ni < normFull.length && normFull[ni] === fullText[wi]) {
+          wsMap.push(wi);
+          ni++;
+        } else if (/[\s\u00a0]/.test(fullText[wi])) {
+          // Whitespace char in original — skip unless it maps to the normalized space
+          if (ni < normFull.length && normFull[ni] === " " && /[\s\u00a0]/.test(fullText[wi])) {
+            wsMap.push(wi);
+            ni++;
+          }
+        }
+      }
+      var wsIdx = normFull.indexOf(normSearch);
+      if (wsIdx !== -1 && wsIdx < wsMap.length) {
+        var wsEndIdx = wsIdx + normSearch.length;
+        idx = wsMap[wsIdx];
+        var origEnd = wsEndIdx <= wsMap.length ? wsMap[wsEndIdx - 1] + 1 : idx + searchText.length;
+        newlineMatched = true; // reuse the origEnd path
+      }
+    }
+
     // If not found, toolbar text inside <code> may be inflating the text.
     if (idx === -1) {
       var skipNodes = new Set();

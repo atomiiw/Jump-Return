@@ -32,7 +32,7 @@ async function getHighlights() {
  * @param {Array|null} [opts.blockTypes] - Block type metadata for multi-block rendering
  * @param {string|null} [opts.responseHTML] - AI response HTML to show in popup
  * @param {string} opts.url - The page URL
- * @param {string} opts.site - The AI chat site (e.g. "chatgpt", "claude")
+ * @param {string} opts.site - The AI chat site (e.g. "chatgpt")
  * @param {string|null} [opts.parentId] - If this highlight is inside a popup, the parent highlight's id
  * @param {number|null} [opts.sourceTurnIndex] - Turn number of the article containing the highlighted text
  * @param {number|null} [opts.questionIndex] - Turn number of the injected question

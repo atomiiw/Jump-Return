@@ -206,9 +206,6 @@
       left = Math.max(8, Math.min(left, cW - popupW - 8));
       popup.style.left = left + "px";
       JR.updateArrow(popup, r, cRect, left);
-      if (st.hoverToolbar) {
-        JR.positionToolbar(st.hoverToolbar, spans);
-      }
     };
     window.addEventListener("resize", st.resizeHandler);
   }
@@ -409,7 +406,8 @@
     }
   }
 
-  function buildToolbarEl(hlId, entry) {
+  function buildToolbarEl(hlId, entry, opts) {
+    opts = opts || {};
     var toolbar = document.createElement("div");
     toolbar.className = "jr-popup-toolbar";
 
@@ -439,15 +437,17 @@
       })(colors[i]);
     }
 
-    var trashBtn = document.createElement("button");
-    trashBtn.type = "button";
-    trashBtn.className = "jr-toolbar-delete";
-    trashBtn.innerHTML = TRASH_SVG;
-    trashBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      showDeleteConfirmation(hlId, entry);
-    });
-    toolbar.appendChild(trashBtn);
+    if (!opts.hideTrash) {
+      var trashBtn = document.createElement("button");
+      trashBtn.type = "button";
+      trashBtn.className = "jr-toolbar-delete";
+      trashBtn.innerHTML = TRASH_SVG;
+      trashBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        showDeleteConfirmation(hlId, entry);
+      });
+      toolbar.appendChild(trashBtn);
+    }
 
     // Stop mousedown from propagating so click-outside doesn't dismiss popup
     toolbar.addEventListener("mousedown", function (e) {
@@ -458,139 +458,58 @@
   }
 
   /**
-   * Show the floating toolbar for a completed highlight.
+   * Show toolbar — now embedded inline in the popup, so this is a no-op.
+   * Kept for backward compatibility with callers.
    */
-  JR.showToolbar = function (hlId) {
-    if (st.confirmingDelete) return;
-    var entry = st.completedHighlights.get(hlId);
-    if (!entry || !entry.spans || entry.spans.length === 0) return;
-
-    // Cancel any pending hide
-    if (st.hoverToolbarTimer) {
-      clearTimeout(st.hoverToolbarTimer);
-      st.hoverToolbarTimer = null;
-    }
-
-    // If already showing for this highlight, just reposition
-    if (st.hoverToolbar && st.hoverToolbarHlId === hlId) {
-      JR.positionToolbar(st.hoverToolbar, entry.spans);
-      return;
-    }
-
-    // Remove old toolbar (including any mid-fade)
-    if (st.hoverToolbar) {
-      st.hoverToolbar.remove();
-      st.hoverToolbar = null;
-    }
-    var fading = document.querySelectorAll(".jr-toolbar-hiding");
-    for (var i = 0; i < fading.length; i++) fading[i].remove();
-
-    var toolbar = buildToolbarEl(hlId, entry);
-    st.hoverToolbar = toolbar;
-    st.hoverToolbarHlId = hlId;
-
-    // Find content container from the spans
-    var contentContainer = entry.contentContainer;
-    if (!contentContainer || !contentContainer.isConnected) {
-      var article = entry.spans[0].closest(S.aiTurn);
-      contentContainer = article ? article.parentElement : document.body;
-    }
-    if (getComputedStyle(contentContainer).position === "static") {
-      contentContainer.style.position = "relative";
-    }
-
-    toolbar.style.left = "-9999px";
-    toolbar.style.top = "-9999px";
-    contentContainer.appendChild(toolbar);
-    JR.positionToolbar(toolbar, entry.spans);
-  };
+  JR.showToolbar = function () {};
 
   /**
    * Hide the floating toolbar.
    */
-  JR.hideToolbar = function () {
-    if (st.confirmingDelete) return;
-    if (st.hoverToolbar) {
-      var tb = st.hoverToolbar;
-      tb.classList.add("jr-toolbar-hiding");
-      st.hoverToolbar = null;
-      st.hoverToolbarHlId = null;
-      setTimeout(function () { tb.remove(); }, 120);
-    }
-  };
+  /**
+   * Hide toolbar — now embedded inline in the popup, so this is a no-op.
+   */
+  JR.hideToolbar = function () {};
 
   /**
    * Position the floating toolbar near the highlight.
    * If a popup is open for this highlight, goes on the opposite side.
    * Otherwise defaults to above the highlight.
    */
-  JR.positionToolbar = function (toolbar, spans) {
-    if (!toolbar || !toolbar.parentElement) return;
-    var hlRect = JR.getHighlightRect(spans);
-    var contentContainer = toolbar.parentElement;
-    var cRect = contentContainer.getBoundingClientRect();
-    var toolbarW = toolbar.offsetWidth;
-    var toolbarH = toolbar.offsetHeight;
-    var gap = 4;
+  /**
+   * Position toolbar — now inline, so this is a no-op.
+   */
+  JR.positionToolbar = function () {};
 
-    // Determine which side: opposite of popup if open for THIS highlight, else above
-    var popupDirection = null;
-    if (st.activeHighlightId === st.hoverToolbarHlId && st.activePopup && st.activePopup._jrDirection) {
-      popupDirection = st.activePopup._jrDirection;
-    }
-
-    // Toolbar side determines which line is adjacent
-    // toolbar goes opposite the popup, so it's adjacent to the same line as the popup
-    var toolbarSide; // side where toolbar goes
-    if (popupDirection === "below") {
-      toolbarSide = "above";
-    } else if (popupDirection === "above") {
-      toolbarSide = "below";
-    } else {
-      toolbarSide = "above";
-    }
-
-    // Center horizontally over the full highlight block (aligned with popup arrow)
-    var left = hlRect.left - cRect.left + hlRect.width / 2 - toolbarW / 2;
-    var cW = contentContainer.clientWidth;
-    left = Math.max(4, Math.min(left, cW - toolbarW - 4));
-
-    // Position on the opposite side of the entire highlight block
-    var top;
-    if (toolbarSide === "below") {
-      top = hlRect.bottom - cRect.top + gap;
-    } else {
-      top = hlRect.top - cRect.top - toolbarH - gap;
-    }
-
-    toolbar.classList.remove("jr-toolbar-above", "jr-toolbar-below");
-    toolbar.classList.add(toolbarSide === "below" ? "jr-toolbar-below" : "jr-toolbar-above");
-
-    toolbar.style.left = left + "px";
-    toolbar.style.top = top + "px";
-  };
 
   function showDeleteConfirmation(hlId, entry) {
-    // Capture toolbar dimensions and parent before replacing
-    var tbLeft = st.hoverToolbar ? st.hoverToolbar.style.left : null;
-    var tbTop = st.hoverToolbar ? st.hoverToolbar.style.top : null;
-    var tbSideClass = st.hoverToolbar && st.hoverToolbar.classList.contains("jr-toolbar-below") ? "jr-toolbar-below" : "jr-toolbar-above";
-    var contentContainer = st.hoverToolbar ? st.hoverToolbar.parentElement : entry.contentContainer;
+    if (!st.activePopup) return;
+    var popup = st.activePopup;
 
     st.confirmingDelete = true;
     JR.updateNavDisabled();
-    // Disable popup interaction while confirming
-    if (st.activePopup) st.activePopup.classList.add("jr-popup-disabled");
 
+    // Build confirm card inside the popup (after counting descendants)
     countDescendants(hlId).then(function (count) {
-      var total = count + 1;
-      var confirmEl = document.createElement("div");
-      confirmEl.className = "jr-popup-confirm jr-popup-toolbar";
+      // Save popup children so we can restore on cancel (done inside .then to avoid empty-frame flicker)
+      // Clone the arrow so the confirm view has one too
+      var arrowEl = popup.querySelector(".jr-popup-arrow");
+      var arrowClone = arrowEl ? arrowEl.cloneNode(true) : null;
+      var savedChildren = [];
+      while (popup.firstChild) {
+        savedChildren.push(popup.removeChild(popup.firstChild));
+      }
+      if (arrowClone) popup.appendChild(arrowClone);
+      var confirmCard = document.createElement("div");
+      confirmCard.className = "jr-popup-upper jr-popup-delete-confirm";
 
       var text = document.createElement("div");
       text.className = "jr-popup-confirm-text";
-      text.textContent = "Delete " + total + " follow-up" + (total === 1 ? "" : "s") + "?";
-      confirmEl.appendChild(text);
+      if (count === 0) {
+        text.textContent = "Delete this highlight?";
+      } else {
+        text.textContent = "Delete this and " + count + " nested follow-up" + (count === 1 ? "" : "s") + "?";
+      }
 
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
@@ -599,13 +518,20 @@
       cancelBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
         st.confirmingDelete = false;
-        confirmEl.remove();
-        st.hoverToolbar = null;
-        st.hoverToolbarHlId = null;
-        if (st.activePopup) st.activePopup.classList.remove("jr-popup-disabled");
         JR.updateNavDisabled();
-        // Just restore the color bar
-        JR.showToolbar(hlId);
+        // Restore popup content — keep current left, only adjust top for "above" popups
+        var savedLeft = popup.style.left;
+        while (popup.firstChild) popup.removeChild(popup.firstChild);
+        for (var ri = 0; ri < savedChildren.length; ri++) {
+          popup.appendChild(savedChildren[ri]);
+        }
+        popup.style.left = savedLeft;
+        var dir = popup._jrLockedDirection || popup._jrDirection;
+        if (dir === "above" && st.activeSourceHighlights.length > 0 && popup.parentElement) {
+          var hRect = JR.getHighlightRect(st.activeSourceHighlights);
+          var cRect = popup.parentElement.getBoundingClientRect();
+          popup.style.top = (hRect.top - cRect.top - popup.offsetHeight - 8) + "px";
+        }
       });
 
       var deleteBtn = document.createElement("button");
@@ -614,45 +540,22 @@
       deleteBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.49,80.49l-128,128a12,12,0,0,1-17,0l-56-56a12,12,0,1,1,17-17L96,183,215.51,63.51a12,12,0,0,1,17,17Z"/></svg>';
       deleteBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
-        confirmEl.remove();
-        st.hoverToolbar = null;
-        st.hoverToolbarHlId = null;
-        if (st.activePopup) st.activePopup.classList.remove("jr-popup-disabled");
+        st.confirmingDelete = false;
         executeDelete(hlId);
       });
 
-      var buttons = document.createElement("div");
-      buttons.className = "jr-popup-confirm-buttons";
-      buttons.appendChild(cancelBtn);
-      buttons.appendChild(deleteBtn);
-      confirmEl.appendChild(buttons);
+      confirmCard.appendChild(text);
+      confirmCard.appendChild(cancelBtn);
+      confirmCard.appendChild(deleteBtn);
 
-
-      // Remove the color bar directly (can't use hideToolbar — confirmingDelete blocks it)
-      if (st.hoverToolbar) {
-        st.hoverToolbar.remove();
-        st.hoverToolbar = null;
-        st.hoverToolbarHlId = null;
-      }
-      if (st.hoverToolbarTimer) {
-        clearTimeout(st.hoverToolbarTimer);
-        st.hoverToolbarTimer = null;
-      }
-      if (!contentContainer || !contentContainer.isConnected) {
-        contentContainer = entry.contentContainer;
-      }
-      if (contentContainer) {
-        contentContainer.appendChild(confirmEl);
-        // Place at the exact same position as the color bar
-        if (tbLeft !== null && tbTop !== null) {
-          confirmEl.classList.add(tbSideClass);
-          confirmEl.style.left = tbLeft;
-          confirmEl.style.top = tbTop;
-        } else {
-          JR.positionToolbar(confirmEl, entry.spans);
-        }
-        st.hoverToolbar = confirmEl;
-        st.hoverToolbarHlId = hlId;
+      popup.appendChild(confirmCard);
+      // Keep horizontal position — only adjust top for "above" popups
+      var dir = popup._jrLockedDirection || popup._jrDirection;
+      if (dir === "above" && st.activeSourceHighlights.length > 0 && popup.parentElement) {
+        var hRect = JR.getHighlightRect(st.activeSourceHighlights);
+        var cRect = popup.parentElement.getBoundingClientRect();
+        var gap = 8;
+        popup.style.top = (hRect.top - cRect.top - popup.offsetHeight - gap) + "px";
       }
     });
   }
@@ -787,7 +690,15 @@
       }
 
       updateNav();
-      JR.repositionPopup();
+
+      // Only update arrow — don't recalculate left/top which would
+      // reset any user resize/position adjustments.
+      if (st.activeSourceHighlights.length > 0 && popup.parentElement) {
+        var rect = JR.getHighlightRect(st.activeSourceHighlights);
+        var cRect = popup.parentElement.getBoundingClientRect();
+        var left = parseFloat(popup.style.left) || 0;
+        JR.updateArrow(popup, rect, cRect, left);
+      }
     }
 
     prevBtn.addEventListener("click", function (e) {
@@ -803,8 +714,31 @@
     });
 
     updateNav();
+
+    // Expose a direct-jump function so external code (Cmd+F search)
+    // can switch to any version in one shot without clicking arrows.
+    nav._jrSwitchTo = switchVersion;
+
     return nav;
   }
+
+  /**
+   * Public: jump the currently-open popup to a specific version index.
+   * Uses the version nav's internal switchVersion — single DOM update,
+   * no flickering from repeated button clicks.
+   */
+  JR.switchPopupToVersion = function (hlId, targetVersion) {
+    if (!st.activePopup) return;
+    var entry = st.completedHighlights.get(hlId);
+    if (!entry || !entry.versions || entry.versions.length <= 1) return;
+    var current = entry.activeVersion != null ? entry.activeVersion : entry.versions.length - 1;
+    if (current === targetVersion) return;
+
+    var nav = st.activePopup.querySelector(".jr-popup-version-nav");
+    if (nav && nav._jrSwitchTo) {
+      nav._jrSwitchTo(targetVersion);
+    }
+  };
 
   function restoreChainedHighlights(responseDiv, parentId, contentContainer) {
     st.completedHighlights.forEach(function (chEntry, chId) {
@@ -1066,6 +1000,10 @@
       upper.appendChild(questionDiv);
     }
 
+    // Remove any stale loading div before adding response
+    var staleLoading = popup.querySelector(".jr-popup-loading");
+    if (staleLoading) staleLoading.remove();
+
     if (entry.responseHTML) {
       var responseDiv = document.createElement("div");
       responseDiv.className = "jr-popup-response";
@@ -1151,10 +1089,25 @@
     var w = isChained ? st.customPopupWidthChained : st.customPopupWidthL1;
     if (w) popup.style.width = w + "px";
 
-    // --- Upper card (highlight + question) ---
+    // --- Upper card (toolbar + highlight + question) ---
     var upper = document.createElement("div");
     upper.className = "jr-popup-upper";
     popup.appendChild(upper);
+
+    // --- Inline color toolbar (above blockquote, left-aligned) ---
+    if (st.activeHighlightId || (isCompleted && completedId) || (wrappers && wrappers.length > 0)) {
+      var toolbarHlId = isCompleted ? completedId : null;
+      var toolbarEntry = isCompleted ? entry : null;
+      // Defer building for new highlights — they get a temp ID after this block
+      if (toolbarHlId && toolbarEntry) {
+        var inlineToolbar = buildToolbarEl(toolbarHlId, toolbarEntry);
+        inlineToolbar.classList.add("jr-toolbar-inline");
+        upper.appendChild(inlineToolbar);
+        popup._jrInlineToolbar = inlineToolbar;
+      } else {
+        popup._jrDeferToolbar = true;
+      }
+    }
 
     // --- Context blockquote ---
     var highlight = document.createElement("div");
@@ -1246,9 +1199,17 @@
     }
     JR.syncHighlightActive(st.activeHighlightId);
 
-    // --- Show color toolbar alongside the popup ---
-    if (st.activeHighlightId) {
-      JR.showToolbar(st.activeHighlightId);
+    // --- Build inline toolbar for new (temp) highlights ---
+    if (popup._jrDeferToolbar && st.activeHighlightId) {
+      var deferEntry = st.completedHighlights.get(st.activeHighlightId);
+      if (deferEntry) {
+        var deferToolbar = buildToolbarEl(st.activeHighlightId, deferEntry, { hideTrash: true });
+        deferToolbar.classList.add("jr-toolbar-inline");
+        var upperCard = popup.querySelector(".jr-popup-upper");
+        if (upperCard) upperCard.insertBefore(deferToolbar, upperCard.firstChild);
+        popup._jrInlineToolbar = deferToolbar;
+      }
+      delete popup._jrDeferToolbar;
     }
 
     // --- Resize + scroll tracking ---

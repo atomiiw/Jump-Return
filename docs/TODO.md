@@ -179,7 +179,7 @@ Work through these steps **in order**. Do not skip ahead or add features from la
 
 ## Step 8: Debugging & Polish
 
-### Step 8a: Remove Multi-Site Scaffolding
+### Step 8a: Remove Multi-Site Scaffolding — DONE
 - Strip out any multi-site adapter/config code and leave only ChatGPT support
 - Clean up selectors, injection logic, and any branching that references Claude, Gemini, or Copilot
 
@@ -187,30 +187,44 @@ Work through these steps **in order**. Do not skip ahead or add features from la
 - Support placing the popup on the right side of the highlight (not only left)
 - Automatically choose whichever side has more room; allow the user to toggle if needed
 
-### Step 8c: Cmd+F Search Through Hidden Content
-- Ensure that popup content (questions and responses) that has been wrapped and hidden from the main chat is still discoverable via the browser's Cmd+F / Ctrl+F search
-- Audit all hidden turns and popup HTML to confirm nothing is lost to find-in-page
+### Step 8c: Cmd+F Search Through Hidden Content — DONE
+- **Goal:** User can Cmd+F to find text inside popup responses (which are hidden Q&A turns). Chrome navigates to the match, and the corresponding popup auto-opens showing both question and response.
+- **No duplicate matches:** Hidden Q&A turns (`.jr-hidden`) have their DOM content stripped (`JR.stripHiddenTurnContent`) and stashed in a JS Map. A `MutationObserver` (`stripObserver`) watches for React re-renders that restore content into stripped elements, and re-strips automatically. `JR.restoreHiddenTurnContent(el)` re-populates a turn before unhiding (cancel/dismiss).
+- **Search containers:** `hidden="until-found"` divs (`.jr-search-popup`) hold popup Q&A text — the only findable copy. CSS sr-only technique (`clip: rect(0,0,0,0)`, 1x1px) makes them invisible even when Chrome removes `hidden`. One container per version per highlight — so we know exactly which version to switch to.
+- **Container ordering:** Depth-first — L1-A v0, L1-A v1, A's nested children, L1-B, etc.
+- **Auto-open popups:** A `MutationObserver` detects when Chrome reveals a container (removes `hidden` attr) and opens the corresponding popup chain via `openHighlightChain`. For nested highlights, the full parent chain is opened (L1 → child → grandchild). Always shows question AND response together.
+- **Scroll behavior on match:**
+  1. Page scrolls so the **popup window** is vertically centered in the viewport (popup is the anchor, not the highlight)
+  2. If the match is in a nested highlight, the parent popup's response area scrolls so the nested highlight is centered within it, then the nested popup opens
+  3. Nested popups auto-open (full parent chain: L1 → child → grandchild)
+  4. If the match is in a non-active version, that version is switched to (programmatically clicks version nav arrows if popup already open, or sets `activeVersion` before `createPopup` for fresh opens)
+- **No flicker:** If the same popup is already open, skip recreation — just switch version and re-center scroll. Chrome's find-in-page scroll is overridden by our own `scrollPopupToCenter` (runs synchronously + rAF backup).
+- **Re-hide timing:** Containers re-hidden via `setTimeout(200ms)` after each reveal (not `requestAnimationFrame` — too fast, Chrome misses subsequent matches in same container).
+- **Popup formatting unchanged:** Uses `JR.createPopup({ completedId })` exactly as clicking a highlight — no special formatting for search results.
+- **Keyword highlight limitation:** Chrome's find-in-page highlights text inside the sr-only search container (invisible). The matched keyword is NOT highlighted in the popup because Chrome's search term is not accessible to content scripts — there is no browser API for it. The popup content is a separate DOM tree from the search container.
 
-### Step 8d: Nav Widget Should Not Count Unsent Highlights
+### Step 8d: Nav Widget Should Not Count Unsent Highlights — DONE
 - The highlight navigation widget currently increments the count (e.g. shows "1/5") as soon as a new highlight is created for a question that hasn't been sent yet
 - The nav widget should only count completed highlights — an unsent/in-progress highlight should not appear in the count or be navigable
 - Fix: filter out highlights that don't have a completed response when building the nav list
 
-### Step 8e: Delete Confirmation Bar Refinements
+### Step 8e: Delete Confirmation Bar Refinements — DONE
 - Move the cancel text slightly rightward
 - Make the confirm/cancel icons smaller
-- Replace the red-outline cancel indicator with a fog/opaque white overlay that covers everything except the cancel button, making it clear that cancel is the only clickable action
+- Confirmation bar pops/scales when user clicks outside (attention grab without red outline or fog overlay)
 
 ### Step 8f: Export Highlights as Notes
 - Add an export function where users can export their highlighted questions and responses as structured notes (e.g. markdown or plain text)
 - Accessible from the extension popup or a toolbar button
 - Not urgent — lower priority than other polish items
 
-### Step 8g: Disable Extension Toggle
-- Add a small ✕ button (floating or in the nav widget) that lets the user disable Jump Return on the current page without uninstalling
-- When disabled, all JR event listeners, popups, highlights, and UI are suppressed — ChatGPT behaves as normal
-- Clicking again (or reloading) re-enables it
-- Persist the enabled/disabled state per tab or globally via `chrome.storage.local`
+### Step 8g: Hide Native "Ask ChatGPT" Button — DONE
+- Small ✕ injected at the top-left edge of ChatGPT's native "Ask ChatGPT" selection button
+- MutationObserver detects when the native button appears and injects the ✕
+- Clicking it hides the native "Ask ChatGPT" button for the session; JR popups still work normally
+- Future "Ask ChatGPT" buttons are auto-hidden while the flag is active
+- Recovers automatically on page reload (session-only, not persisted)
+- CSS tooltip on hover: "Hide — recovers on reload"
 
 ### Step 8h: Logo & Description for Public Release
 - Design/decorate the extension logo for the Chrome Web Store
