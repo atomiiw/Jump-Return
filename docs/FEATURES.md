@@ -216,5 +216,18 @@
 - Cleaned up on SPA navigation and re-created after highlights are restored for the new conversation
 - `position: fixed`, vertically centered, no background/border — just arrows and indicator
 
+### Popup Transition Functions (Step 8c)
+- Reusable primitives for navigating between any two popup items with step-by-step animated transitions
+- `JR.openHighlight(quoteId, itemIndex)` — opens any highlight (L1 or nested) by building the full parent chain, scrolling the page, and opening popups layer by layer
+- `JR.transitionTo(targetItemId)` — animated transition from current popup to any target:
+  - Same highlight, different version: flips through intermediate versions one by one (350ms per step)
+  - Different highlights: finds closest common ancestor, peels back to it, then opens down to the target — each step animated
+  - Null target: closes all popups
+  - Already on target: scrolls to center
+- Storage model uses `quoteId` to group versions of the same highlight, and `parentItemId` to track which parent version a child was created in — ensures chained highlights only restore in the correct parent version
+- Console API: `JR.go()` lists items, `JR.go("id")` transitions, `JR.go(null)` closes all
+- Bridge script (`src/console-bridge.js`) runs in MAIN world via manifest so console commands work despite content script isolation
+- Every popup open logs item id and quoteId to console for debugging
+
 ## Planned
 - **Debugging & polish** (Step 8) — right-side popup placement, Cmd+F through hidden content, delete confirmation refinements, nav widget fix, export highlights, disable toggle, public release prep

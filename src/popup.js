@@ -562,12 +562,12 @@
 
   function executeDelete(hlId) {
     st.confirmingDelete = false;
-    var idsToDelete = [];
-    function walkDescendants(parentId) {
-      idsToDelete.push(parentId);
-      st.completedHighlights.forEach(function (entry, id) {
-        if (entry.parentId === parentId) {
-          walkDescendants(id);
+    var quoteIdsToDelete = [];
+    function walkDescendants(parentQuoteId) {
+      quoteIdsToDelete.push(parentQuoteId);
+      st.completedHighlights.forEach(function (entry, qid) {
+        if (entry.parentId === parentQuoteId) {
+          walkDescendants(qid);
         }
       });
     }
@@ -576,16 +576,16 @@
     // Collect all turn indices to persist as hidden, then unwrap spans
     var turnsToHide = [];
 
-    for (var i = 0; i < idsToDelete.length; i++) {
-      var id = idsToDelete[i];
-      var entry = st.completedHighlights.get(id);
+    for (var i = 0; i < quoteIdsToDelete.length; i++) {
+      var qid = quoteIdsToDelete[i];
+      var entry = st.completedHighlights.get(qid);
       if (!entry) continue;
 
-      // Collect turn indices from in-memory versions
-      if (entry.versions && entry.versions.length > 0) {
-        for (var vi = 0; vi < entry.versions.length; vi++) {
-          if (entry.versions[vi].questionIndex > 0) turnsToHide.push(entry.versions[vi].questionIndex);
-          if (entry.versions[vi].responseIndex > 0) turnsToHide.push(entry.versions[vi].responseIndex);
+      // Collect turn indices from in-memory items
+      if (entry.items && entry.items.length > 0) {
+        for (var vi = 0; vi < entry.items.length; vi++) {
+          if (entry.items[vi].questionIndex > 0) turnsToHide.push(entry.items[vi].questionIndex);
+          if (entry.items[vi].responseIndex > 0) turnsToHide.push(entry.items[vi].responseIndex);
         }
       }
 
@@ -601,20 +601,15 @@
         }
       }
 
-      st.completedHighlights.delete(id);
+      st.completedHighlights.delete(qid);
     }
 
-    // Also collect turn indices from storage (covers indices not in memory)
-    var storagePromises = idsToDelete.map(function (delId) {
-      return getHighlight(delId).then(function (hl) {
-        if (!hl) return;
-        if (hl.questionIndex > 0) turnsToHide.push(hl.questionIndex);
-        if (hl.responseIndex > 0) turnsToHide.push(hl.responseIndex);
-        if (hl.versions) {
-          for (var vi2 = 0; vi2 < hl.versions.length; vi2++) {
-            if (hl.versions[vi2].questionIndex > 0) turnsToHide.push(hl.versions[vi2].questionIndex);
-            if (hl.versions[vi2].responseIndex > 0) turnsToHide.push(hl.versions[vi2].responseIndex);
-          }
+    // Also collect turn indices from storage (covers items not in memory)
+    var storagePromises = quoteIdsToDelete.map(function (delQuoteId) {
+      return getHighlightsByQuoteId(delQuoteId).then(function (items) {
+        for (var si = 0; si < items.length; si++) {
+          if (items[si].questionIndex > 0) turnsToHide.push(items[si].questionIndex);
+          if (items[si].responseIndex > 0) turnsToHide.push(items[si].responseIndex);
         }
       });
     });
@@ -640,7 +635,7 @@
   function buildVersionNavInline(container, hlId) {
     var popup = container.closest(".jr-popup");
     var entry = st.completedHighlights.get(hlId);
-    if (!entry || !entry.versions || entry.versions.length <= 1) return null;
+    if (!entry || !entry.items || entry.items.length <= 1) return null;
 
     var nav = document.createElement("div");
     nav.className = "jr-popup-version-nav";
@@ -659,17 +654,17 @@
     nav.appendChild(nextBtn);
 
     function updateNav() {
-      var idx = entry.activeVersion != null ? entry.activeVersion : entry.versions.length - 1;
+      var idx = entry.activeItemIndex != null ? entry.activeItemIndex : entry.items.length - 1;
       prevBtn.disabled = (idx === 0);
-      nextBtn.disabled = (idx === entry.versions.length - 1);
+      nextBtn.disabled = (idx === entry.items.length - 1);
     }
 
     function switchVersion(newIdx) {
-      entry.activeVersion = newIdx;
-      var v = entry.versions[newIdx];
+      entry.activeItemIndex = newIdx;
+      var v = entry.items[newIdx];
       entry.question = v.question;
       entry.responseHTML = v.responseHTML;
-      setHighlightActiveVersion(hlId, newIdx);
+      setActiveItem(hlId, v.id);
 
       // Update question text
       var qText = container.querySelector(".jr-popup-question-text");
@@ -686,7 +681,7 @@
         popup.appendChild(responseDiv);
         rebuildCodeBlocks(responseDiv, v.responseIndex || entry.responseIndex);
 
-        restoreChainedHighlights(responseDiv, hlId, entry.contentContainer);
+        restoreChainedHighlights(responseDiv, hlId, entry.contentContainer, v.id);
       }
 
       updateNav();
@@ -703,14 +698,14 @@
 
     prevBtn.addEventListener("click", function (e) {
       e.stopPropagation();
-      var idx = entry.activeVersion != null ? entry.activeVersion : entry.versions.length - 1;
+      var idx = entry.activeItemIndex != null ? entry.activeItemIndex : entry.items.length - 1;
       if (idx > 0) switchVersion(idx - 1);
     });
 
     nextBtn.addEventListener("click", function (e) {
       e.stopPropagation();
-      var idx = entry.activeVersion != null ? entry.activeVersion : entry.versions.length - 1;
-      if (idx < entry.versions.length - 1) switchVersion(idx + 1);
+      var idx = entry.activeItemIndex != null ? entry.activeItemIndex : entry.items.length - 1;
+      if (idx < entry.items.length - 1) switchVersion(idx + 1);
     });
 
     updateNav();
@@ -730,8 +725,8 @@
   JR.switchPopupToVersion = function (hlId, targetVersion) {
     if (!st.activePopup) return;
     var entry = st.completedHighlights.get(hlId);
-    if (!entry || !entry.versions || entry.versions.length <= 1) return;
-    var current = entry.activeVersion != null ? entry.activeVersion : entry.versions.length - 1;
+    if (!entry || !entry.items || entry.items.length <= 1) return;
+    var current = entry.activeItemIndex != null ? entry.activeItemIndex : entry.items.length - 1;
     if (current === targetVersion) return;
 
     var nav = st.activePopup.querySelector(".jr-popup-version-nav");
@@ -740,20 +735,25 @@
     }
   };
 
-  function restoreChainedHighlights(responseDiv, parentId, contentContainer) {
-    st.completedHighlights.forEach(function (chEntry, chId) {
-      if (chEntry.parentId === parentId) {
-        JR.restoreHighlightInElement(responseDiv, {
-          id: chId, text: chEntry.text, responseHTML: chEntry.responseHTML,
-          sentence: chEntry.sentence, blockTypes: chEntry.blockTypes, question: chEntry.question,
-          parentId: chEntry.parentId, responseIndex: chEntry.responseIndex,
-        }, contentContainer);
-      }
+  function restoreChainedHighlights(responseDiv, parentQuoteId, contentContainer, activeParentItemId) {
+    // Restore from in-memory entries — only children belonging to this version
+    st.completedHighlights.forEach(function (chEntry, chQuoteId) {
+      if (chEntry.parentId !== parentQuoteId) return;
+      if (activeParentItemId && chEntry.parentItemId && chEntry.parentItemId !== activeParentItemId) return;
+      JR.restoreHighlightInElement(responseDiv, {
+        quoteId: chQuoteId, text: chEntry.text, responseHTML: chEntry.responseHTML,
+        sentence: chEntry.sentence, blockTypes: chEntry.blockTypes, question: chEntry.question,
+        parentId: chEntry.parentId, parentItemId: chEntry.parentItemId,
+        responseIndex: chEntry.responseIndex,
+        items: chEntry.items, activeItemIndex: chEntry.activeItemIndex,
+      }, contentContainer);
     });
-    getChildHighlights(parentId).then(function (children) {
+    // Also check storage for children not yet in memory
+    getChildHighlights(parentQuoteId, activeParentItemId).then(function (children) {
       for (var ci = 0; ci < children.length; ci++) {
         var child = children[ci];
-        if (responseDiv.querySelector('[data-jr-highlight-id="' + child.id + '"]')) continue;
+        var childKey = child.quoteId || child.id;
+        if (responseDiv.querySelector('[data-jr-highlight-id="' + childKey + '"]')) continue;
         JR.restoreHighlightInElement(responseDiv, child, contentContainer);
       }
     });
@@ -840,8 +840,8 @@
       var controlsDiv = document.createElement("div");
       controlsDiv.className = "jr-popup-question-controls";
 
-      // Version nav (inline, shown by default if versions exist)
-      var hasVersions = entry.versions && entry.versions.length > 1;
+      // Version nav (inline, shown by default if multiple items exist)
+      var hasVersions = entry.items && entry.items.length > 1;
       var versionNav = null;
       if (hasVersions) {
         versionNav = buildVersionNavInline(upper, id);
@@ -1011,8 +1011,11 @@
       popup.appendChild(responseDiv);
       rebuildCodeBlocks(responseDiv, entry.responseIndex);
 
-      // Restore chained highlights
-      restoreChainedHighlights(responseDiv, id, contentContainer);
+      // Restore chained highlights — only those belonging to the active version
+      var activeItem = (entry.items && entry.items.length > 0)
+        ? entry.items[entry.activeItemIndex != null ? entry.activeItemIndex : 0]
+        : null;
+      restoreChainedHighlights(responseDiv, id, contentContainer, activeItem ? activeItem.id : null);
     } else {
       popup.appendChild(JR.createLoadingDiv());
     }
@@ -1170,6 +1173,7 @@
     }
 
     JR.positionPopup(popup, posRect, contentContainer, null, spans);
+    JR.attachAboveAnchorObserver(popup);
     JR.addResizeHandlers(popup);
 
     // --- Register active state ---
@@ -1184,6 +1188,7 @@
         wrappers[ti].setAttribute("data-jr-highlight-id", tempId);
       }
       st.completedHighlights.set(tempId, {
+        quoteId: tempId,
         spans: wrappers,
         color: autoColor || null,
         text: text,
@@ -1191,6 +1196,8 @@
         blockTypes: blockTypes,
         contentContainer: contentContainer,
         parentId: parentId || null,
+        items: [],
+        activeItemIndex: 0,
         _jrTemp: true,
       });
       st.activeHighlightId = tempId;
@@ -1224,7 +1231,6 @@
     }
 
     JR.updateNavWidget();
-    if (JR.scheduleSearchRebuild) JR.scheduleSearchRebuild();
   };
 
   /**

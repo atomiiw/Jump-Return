@@ -33,7 +33,7 @@
       responseWatchActive: false,       // true while waitForResponse is polling (including detached)
       activeSourceHighlights: [],       // wrapper <span> elements in the AI response
       resizeHandler: null,              // window resize listener
-      completedHighlights: new Map(),   // id → { spans, responseHTML, text, sentence, contentContainer }
+      completedHighlights: new Map(),   // quoteId → { quoteId, spans, text, sentence, items: [{id, question, responseHTML, ...}], activeItemIndex, ... }
       activeHighlightId: null,          // current popup's highlight id (for chaining)
       popupStack: [],                   // saved parent popup states for nested chains
       restoreTimer: null,

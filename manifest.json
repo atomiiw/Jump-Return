@@ -30,6 +30,15 @@
       ],
       "css": ["styles.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
+      "js": ["src/console-bridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
   "action": {

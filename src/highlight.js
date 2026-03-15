@@ -275,26 +275,34 @@
    * Restore a single highlight by text-matching within a root element.
    * Shared by restoreHighlights (level 1, page reload) and
    * createPopup with completedId (chained highlights inside popup response).
+   *
+   * @param {Element} root - DOM element to search for the text
+   * @param {object} hl - Highlight data. Uses hl.quoteId (or hl.id) as the map key
+   *   and DOM data attribute. Must have: text, sentence, blockTypes, responseHTML,
+   *   question, color, parentId, responseIndex. May have: items (array of versions).
+   * @param {Element} contentContainer
    */
   JR.restoreHighlightInElement = function (root, hl, contentContainer) {
+    var hlKey = hl.quoteId || hl.id;
     var range = JR.findTextRange(root, hl.text);
     if (!range) {
-      console.warn("[JR restore] findTextRange failed for:", hl.text.slice(0, 60), "id:", hl.id);
+      console.warn("[JR restore] findTextRange failed for:", hl.text.slice(0, 60), "id:", hlKey);
       return false;
     }
     var wrappers = JR.highlightRange(range);
     if (wrappers.length === 0) {
-      console.warn("[JR restore] highlightRange returned 0 wrappers for:", hl.text.slice(0, 60), "id:", hl.id);
+      console.warn("[JR restore] highlightRange returned 0 wrappers for:", hl.text.slice(0, 60), "id:", hlKey);
       return false;
     }
     for (var k = 0; k < wrappers.length; k++) {
-      wrappers[k].setAttribute("data-jr-highlight-id", hl.id);
+      wrappers[k].setAttribute("data-jr-highlight-id", hlKey);
       wrappers[k].classList.add("jr-source-highlight-done");
       if (hl.color) {
         wrappers[k].classList.add("jr-highlight-color-" + hl.color);
       }
     }
     var entry = {
+      quoteId: hlKey,
       spans: wrappers,
       responseHTML: hl.responseHTML,
       text: hl.text,
@@ -304,14 +312,12 @@
       color: hl.color || null,
       contentContainer: contentContainer,
       parentId: hl.parentId || null,
+      parentItemId: hl.parentItemId || null,
       responseIndex: hl.responseIndex || -1,
+      items: hl.items || [{ id: hl.id, question: hl.question || null, responseHTML: hl.responseHTML, questionIndex: hl.questionIndex || -1, responseIndex: hl.responseIndex || -1 }],
+      activeItemIndex: hl.activeItemIndex != null ? hl.activeItemIndex : 0,
     };
-    // Preserve version data from storage
-    if (hl.versions) {
-      entry.versions = hl.versions;
-      entry.activeVersion = hl.activeVersion != null ? hl.activeVersion : hl.versions.length - 1;
-    }
-    st.completedHighlights.set(hl.id, entry);
+    st.completedHighlights.set(hlKey, entry);
     return true;
   };
 
@@ -367,24 +373,72 @@
     getHighlightsByUrl(url).then(function (highlights) {
       if (highlights.length === 0) return;
 
-      // Collect all turn indices to hide (level-1 and chained, all versions)
+      // Collect all turn indices to hide (every item, every quoteId)
       var allTurnIndices = [];
-      var restorable = [];
       for (var hi = 0; hi < highlights.length; hi++) {
         var h = highlights[hi];
-        if (h.versions && h.versions.length > 0) {
-          for (var vi = 0; vi < h.versions.length; vi++) {
-            var ver = h.versions[vi];
-            if (ver.questionIndex > 0) allTurnIndices.push(ver.questionIndex);
-            if (ver.responseIndex > 0) allTurnIndices.push(ver.responseIndex);
-          }
-        } else {
-          if (h.questionIndex > 0) allTurnIndices.push(h.questionIndex);
-          if (h.responseIndex > 0) allTurnIndices.push(h.responseIndex);
+        if (h.questionIndex > 0) allTurnIndices.push(h.questionIndex);
+        if (h.responseIndex > 0) allTurnIndices.push(h.responseIndex);
+      }
+
+      // Group items by quoteId, then build restorable list for level-1 highlights
+      var quoteMap = {};
+      for (var gi = 0; gi < highlights.length; gi++) {
+        var item = highlights[gi];
+        var qid = item.quoteId;
+        if (!quoteMap[qid]) {
+          quoteMap[qid] = {
+            quoteId: qid,
+            text: item.text,
+            sentence: item.sentence,
+            blockTypes: item.blockTypes,
+            color: item.color,
+            parentId: item.parentId,
+            parentItemId: item.parentItemId || null,
+            sourceTurnIndex: item.sourceTurnIndex,
+            items: [],
+            activeItemIndex: 0,
+            // Convenience — will be set from active item below
+            question: null,
+            responseHTML: null,
+            responseIndex: -1,
+          };
         }
-        // Only level-1 highlights get visually restored here
-        if (!h.parentId && h.sourceTurnIndex > 0 && h.responseHTML) {
-          restorable.push(h);
+        var itemObj = {
+          id: item.id,
+          question: item.question,
+          responseHTML: item.responseHTML,
+          questionIndex: item.questionIndex,
+          responseIndex: item.responseIndex,
+        };
+        quoteMap[qid].items.push(itemObj);
+        if (item.active) {
+          quoteMap[qid].activeItemIndex = quoteMap[qid].items.length - 1;
+          quoteMap[qid].question = item.question;
+          quoteMap[qid].responseHTML = item.responseHTML;
+          quoteMap[qid].responseIndex = item.responseIndex;
+          quoteMap[qid].color = item.color;
+        }
+      }
+      // If no item was marked active, default to the last one
+      var quoteIds = Object.keys(quoteMap);
+      for (var qi = 0; qi < quoteIds.length; qi++) {
+        var qEntry = quoteMap[quoteIds[qi]];
+        if (!qEntry.question && qEntry.items.length > 0) {
+          var lastItem = qEntry.items[qEntry.items.length - 1];
+          qEntry.activeItemIndex = qEntry.items.length - 1;
+          qEntry.question = lastItem.question;
+          qEntry.responseHTML = lastItem.responseHTML;
+          qEntry.responseIndex = lastItem.responseIndex;
+        }
+      }
+
+      // Only level-1 highlights (no parentId) with source and response get visually restored
+      var restorable = [];
+      for (var ri2 = 0; ri2 < quoteIds.length; ri2++) {
+        var qe = quoteMap[quoteIds[ri2]];
+        if (!qe.parentId && qe.sourceTurnIndex > 0 && qe.responseHTML) {
+          restorable.push(qe);
         }
       }
 
@@ -422,7 +476,7 @@
         for (var i = 0; i < remaining.length; i++) {
           var hl = remaining[i];
 
-          if (st.completedHighlights.has(hl.id)) continue;
+          if (st.completedHighlights.has(hl.quoteId)) continue;
 
           var sourceArticle = document.querySelector(
             'article[data-testid="conversation-turn-' + hl.sourceTurnIndex + '"]'
@@ -450,8 +504,6 @@
         attempts++;
 
         JR.updateNavWidget();
-        if (JR.stripHiddenTurnContent && !st.responseWatchActive) JR.stripHiddenTurnContent();
-        if (JR.buildSearchContainers) JR.buildSearchContainers();
 
         if ((remaining.length > 0 || turnsRemaining.length > 0) && attempts < maxAttempts) {
           st.restoreTimer = setTimeout(tryRestore, 500);

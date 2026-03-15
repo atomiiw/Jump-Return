@@ -405,7 +405,33 @@
     popup.style.left = left + "px";
     popup.style.top = top + "px";
     popup._jrDirection = direction;
+
+    // For "above" popups, store the bottom anchor so height changes keep the
+    // arrow edge pinned to the highlight.
+    if (direction === "above") {
+      popup._jrBottomAnchor = top + popupH;
+    }
+
     JR.updateArrow(popup, centerRect, containerRect, left);
+  };
+
+  /**
+   * Attach a ResizeObserver to an "above" popup so that when its height
+   * changes (streaming, version switch, edit rebuild), the bottom edge
+   * stays pinned to the highlight and the arrow doesn't drift.
+   */
+  JR.attachAboveAnchorObserver = function (popup) {
+    if (typeof ResizeObserver === "undefined") return;
+    var ro = new ResizeObserver(function () {
+      if (popup._jrBottomAnchor == null) return;
+      if (popup._jrResizing) return; // drag-resize already handles this
+      var dir = popup._jrLockedDirection || popup._jrDirection;
+      if (dir !== "above") return;
+      var newH = popup.offsetHeight;
+      popup.style.top = (popup._jrBottomAnchor - newH) + "px";
+    });
+    ro.observe(popup);
+    popup._jrAboveObserver = ro;
   };
 
   /**
@@ -438,6 +464,9 @@
     st.activePopup.style.left = left + "px";
     st.activePopup.style.top = top + "px";
     st.activePopup._jrDirection = direction;
+    if (direction === "above") {
+      st.activePopup._jrBottomAnchor = top + popupH;
+    }
     JR.updateArrow(st.activePopup, centerRect, containerRect, left);
   };
 
@@ -483,7 +512,7 @@
       var dir = popup._jrLockedDirection || popup._jrDirection;
       // For "above" popups, anchor the bottom edge so the arrow doesn't move
       var anchorBottom = (dir === "above")
-        ? (parseFloat(popup.style.top) || 0) + popup.offsetHeight
+        ? (popup._jrBottomAnchor != null ? popup._jrBottomAnchor : (parseFloat(popup.style.top) || 0) + popup.offsetHeight)
         : null;
 
       // Compute the arrow's X position (relative to container) as the resize limit.
@@ -544,6 +573,10 @@
           st.customPopupWidthChained = popup.offsetWidth;
         } else {
           st.customPopupWidthL1 = popup.offsetWidth;
+        }
+        // Sync bottom anchor after resize so the ResizeObserver uses the right value
+        if (anchorBottom !== null) {
+          popup._jrBottomAnchor = anchorBottom;
         }
         popup.style.cursor = "";
         document.removeEventListener("mousemove", onMove, true);
@@ -883,6 +916,7 @@
     navNavigating = true;
     JR.scrollToAndOpenPopup(targetId);
     navNavigating = false;
+    JR.updateNavWidget();
   };
 
   /**
@@ -945,6 +979,10 @@
     }
 
     if (st.activePopup) {
+      if (st.activePopup._jrAboveObserver) {
+        st.activePopup._jrAboveObserver.disconnect();
+        st.activePopup._jrAboveObserver = null;
+      }
       if (st.activePopup._jrScrollCleanup) {
         st.activePopup._jrScrollCleanup();
         st.activePopup._jrScrollCleanup = null;
@@ -968,6 +1006,5 @@
       JR.showToolbar(st.activeHighlightId);
     }
     JR.updateNavWidget();
-    if (JR.scheduleSearchRebuild) JR.scheduleSearchRebuild();
   };
 })();

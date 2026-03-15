@@ -182,6 +182,15 @@
   };
 
   JR.waitForResponse = function (popup, turnsBefore, text, sentence, blockTypes, unlockScroll, parentId, question, editOpts) {
+    // Resolve the parent's active item id at call time (for parentItemId tracking)
+    var parentItemId = null;
+    if (parentId) {
+      var parentEntry = st.completedHighlights.get(parentId);
+      if (parentEntry && parentEntry.items && parentEntry.items.length > 0) {
+        var pidx = parentEntry.activeItemIndex != null ? parentEntry.activeItemIndex : 0;
+        parentItemId = parentEntry.items[pidx] ? parentEntry.items[pidx].id : null;
+      }
+    }
     st.responseWatchActive = true;
     var startTime = Date.now();
     var timeoutMs = 100000; // 100 seconds
@@ -197,14 +206,8 @@
     var streamDirty = false;
 
     function unhideTurns() {
-      if (questionTurn) {
-        if (JR.restoreHiddenTurnContent) JR.restoreHiddenTurnContent(questionTurn);
-        questionTurn.classList.remove("jr-hidden");
-      }
-      if (responseTurn) {
-        if (JR.restoreHiddenTurnContent) JR.restoreHiddenTurnContent(responseTurn);
-        responseTurn.classList.remove("jr-hidden");
-      }
+      if (questionTurn) questionTurn.classList.remove("jr-hidden");
+      if (responseTurn) responseTurn.classList.remove("jr-hidden");
     }
 
     function cleanup() {
@@ -326,6 +329,7 @@
           if (detachColor) detachedSpans[k].classList.add("jr-highlight-color-" + detachColor);
         }
         var detachEntry = {
+          quoteId: detachedHlId,
           spans: detachedSpans.slice(),
           responseHTML: null,
           text: text,
@@ -334,6 +338,9 @@
           question: question || null,
           contentContainer: contentContainer,
           parentId: parentId || null,
+          parentItemId: parentItemId || null,
+          items: [],
+          activeItemIndex: 0,
         };
         if (detachColor) detachEntry.color = detachColor;
         st.completedHighlights.set(detachedHlId, detachEntry);
@@ -364,7 +371,7 @@
 
       responseTurn.classList.add("jr-hidden");
 
-      // --- Edit mode: add version instead of creating new highlight ---
+      // --- Edit mode: save new item with same quoteId ---
       if (editOpts) {
         var hlId = editOpts.hlId;
 
@@ -376,31 +383,37 @@
         var qNum = questionTurn ? JR.getTurnNumber(questionTurn) : -1;
         var rNum = JR.getTurnNumber(responseTurn);
 
-        var versionObj = {
-          question: question,
-          responseHTML: responseHTML,
-          questionIndex: qNum,
-          responseIndex: rNum,
-        };
-
-        // Persist new version to storage
-        addHighlightVersion(hlId, versionObj);
-
         // Update in-memory entry
         var memEntry = st.completedHighlights.get(hlId);
+        var newItemId = crypto.randomUUID();
         if (memEntry) {
-          if (!memEntry.versions) {
-            memEntry.versions = [{
-              question: memEntry.question,
-              responseHTML: memEntry.responseHTML,
-            }];
-          }
-          memEntry.versions.push({ question: question, responseHTML: responseHTML, responseIndex: rNum });
-          memEntry.activeVersion = memEntry.versions.length - 1;
+          var newItem = { id: newItemId, question: question, responseHTML: responseHTML, questionIndex: qNum, responseIndex: rNum };
+          memEntry.items.push(newItem);
+          memEntry.activeItemIndex = memEntry.items.length - 1;
           memEntry.question = question;
           memEntry.responseHTML = responseHTML;
           memEntry.responseIndex = rNum;
         }
+
+        // Persist new item to storage (deactivates old items with same quoteId)
+        saveHighlight({
+          id: newItemId,
+          quoteId: hlId,
+          text: text,
+          sentence: sentence,
+          blockTypes: blockTypes,
+          responseHTML: responseHTML,
+          question: question,
+          url: location.href,
+          site: "chatgpt",
+          parentId: parentId || null,
+          parentItemId: memEntry ? memEntry.parentItemId : null,
+          sourceTurnIndex: memEntry ? (memEntry.spans && memEntry.spans[0] ? JR.getTurnNumber(memEntry.spans[0].closest(S.aiTurn)) : -1) : -1,
+          questionIndex: qNum,
+          responseIndex: rNum,
+          color: memEntry ? memEntry.color : null,
+          active: true,
+        });
 
         // Rebuild popup UI if it's open for this highlight
         if (!detached && popup && popup.isConnected) {
@@ -440,7 +453,15 @@
       if (detached) {
         hlId2 = detachedHlId;
         var entry = st.completedHighlights.get(hlId2);
-        if (entry) entry.responseHTML = responseHTML;
+        if (entry) {
+          entry.responseHTML = responseHTML;
+          // Populate items if not already set
+          if (!entry.items || entry.items.length === 0) {
+            var detItemId = crypto.randomUUID();
+            entry.items = [{ id: detItemId, question: question || null, responseHTML: responseHTML, questionIndex: qNum2, responseIndex: rNum2 }];
+            entry.activeItemIndex = 0;
+          }
+        }
 
         if (st.activePopup && st.activeSourceHighlights.length > 0 &&
             st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId2) {
@@ -451,6 +472,7 @@
         }
       } else {
         hlId2 = crypto.randomUUID();
+        var itemId2 = crypto.randomUUID();
         if (spans.length > 0 && responseHTML) {
           var contentContainer = popup.parentElement;
           for (var k = 0; k < spans.length; k++) {
@@ -459,6 +481,7 @@
           }
           var autoColor = getAutoColor(spans);
           var entryObj = {
+            quoteId: hlId2,
             spans: spans.slice(),
             responseHTML: responseHTML,
             text: text,
@@ -468,7 +491,10 @@
             color: autoColor || null,
             contentContainer: contentContainer,
             parentId: parentId || null,
+            parentItemId: parentItemId || null,
             responseIndex: rNum2,
+            items: [{ id: itemId2, question: question || null, responseHTML: responseHTML, questionIndex: qNum2, responseIndex: rNum2 }],
+            activeItemIndex: 0,
           };
           if (autoColor) {
             for (var ac = 0; ac < spans.length; ac++) {
@@ -510,7 +536,8 @@
         : null;
       var sourceTurnIdx = sourceArticle ? JR.getTurnNumber(sourceArticle) : -1;
       saveHighlight({
-        id: hlId2,
+        id: detached ? (entry && entry.items && entry.items[0] ? entry.items[0].id : crypto.randomUUID()) : itemId2,
+        quoteId: hlId2,
         text: text,
         sentence: sentence,
         blockTypes: blockTypes,
@@ -519,6 +546,7 @@
         url: location.href,
         site: "chatgpt",
         parentId: parentId || null,
+        parentItemId: parentItemId || null,
         sourceTurnIndex: sourceTurnIdx,
         questionIndex: qNum2,
         responseIndex: rNum2,
@@ -526,8 +554,6 @@
       });
 
       JR.updateNavWidget();
-      if (JR.stripHiddenTurnContent) JR.stripHiddenTurnContent();
-      if (JR.buildSearchContainers) JR.buildSearchContainers();
       st.cancelResponseWatch = null;
     }
 

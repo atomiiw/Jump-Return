@@ -1221,20 +1221,6 @@ ol.jr-popup-context-list .jr-depth-2 {
   transform: scale(1.35);
 }
 
-/* --- Search containers (Cmd+F) — visually hidden, only for text matching --- */
-
-.jr-search-popup {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  white-space: nowrap !important;
-  border: 0 !important;
-  padding: 0 !important;
-  margin: -1px !important;
-}
-
 /* --- Highlight navigation widget (Step 7d) --- */
 
 .jr-nav-widget {

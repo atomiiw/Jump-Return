@@ -187,7 +187,30 @@ Work through these steps **in order**. Do not skip ahead or add features from la
 - Support placing the popup on the right side of the highlight (not only left)
 - Automatically choose whichever side has more room; allow the user to toggle if needed
 
-### Step 8c: Cmd+F Search Through Hidden Content — DONE
+### Step 8c: Popup Transition Functions — DONE
+- **Goal:** Provide reusable primitives for navigating between any two popup items, with step-by-step animated transitions. Other code (Cmd+F search, future features) composes these instead of building ad-hoc open/close logic.
+- **Storage model (quoteId):** Each version of a highlight is an independent storage record `{id, quoteId, text, question, responseHTML, parentId, parentItemId, active, ...}`. Records sharing the same `quoteId` are versions of the same highlight. `parentId` references the parent's `quoteId`. `parentItemId` tracks which specific parent version the child was created in, so `restoreChainedHighlights` only restores children belonging to the active version.
+- **Reusable functions:**
+  - `JR.openHighlight(quoteId, itemIndex)` — opens any highlight (L1 or nested) by building the full parent chain, scrolling the page, and opening popups one by one. Handles version selection.
+  - `JR.transitionTo(targetItemId)` — animated step-by-step transition from the current popup state to any target item:
+    - **Same quoteId (version flip):** Steps through intermediate versions one at a time (350ms per step) using the version nav's `switchVersion`, then scrolls to center.
+    - **Different quoteId:** Builds ancestor chains for current and target, finds the closest common parent, peels back popups to that parent one by one, then opens popups down to the target one by one. Each step animated at 350ms.
+    - **Null target:** Closes all popups and stays in place.
+    - **Already on target:** Scrolls to center the popup (handles the "scrolled away" case).
+  - `peelOne()` — closes one popup layer (pops the stack), returns the newly active quoteId.
+  - `openChildLayer(childQuoteId)` — scrolls the parent's response to a child highlight and opens it as a stacked popup.
+  - `flipVersions(quoteId, entry, from, to, delay, callback)` — steps through versions ±1 at a time with delay, calls callback when done.
+  - `findItemById(itemId)` — searches all in-memory entries for an item id, returns `{quoteId, entry, itemIndex}`.
+  - `getCurrentItemId()` — returns the item id currently displayed in the active popup.
+- **Console API (for testing):**
+  - `JR.go()` — prints all available items with ids, question snippets, active/current markers, indented by nesting depth.
+  - `JR.go("item-id")` — calls `JR.transitionTo` with that item id.
+  - `JR.go(null)` — closes all popups.
+  - Bridge script (`src/console-bridge.js`) runs in MAIN world via manifest `"world": "MAIN"`, exposing `JR.go()` and `JR.open()` to the browser console. Communicates with the content script via CustomEvents on `document`.
+- **Popup open logging:** Every `createPopup` call logs the active item id, quoteId, and question to the console for easy debugging.
+
+### Step 8d: Cmd+F Search Through Hidden Content — DONE
+*Previously Step 8c. Renumbered to make room for Step 8c (Popup Transition Functions).*
 - **Goal:** User can Cmd+F to find text inside popup responses (which are hidden Q&A turns). Chrome navigates to the match, and the corresponding popup auto-opens showing both question and response.
 - **Built from reusable primitives:**
   - `JR.scrollToAndOpenPopup(hlId)` — scrolls page to highlight + opens popup; reused by nav widget, Cmd+F, and any code path
@@ -199,25 +222,28 @@ Work through these steps **in order**. Do not skip ahead or add features from la
 - **Container ordering:** Top-to-bottom on page (L1 order) → outer-to-inner (depth-first children) → first version to later versions. This ensures Cmd+F/Cmd+G cycles in natural reading order.
 - **Auto-open popups:** A `MutationObserver` detects when Chrome reveals a container (removes `hidden` attr) and calls `openHighlightForSearch` which composes the primitives above: opens the L1 popup, walks the parent chain for nested matches, switches version, and centers the popup.
 - **Scroll behavior:** Page scrolls so the popup is vertically centered in the viewport. For nested matches, the parent popup's response scrolls to the child highlight. Chrome's auto-scroll is overridden (sync + rAF backup).
-- **Re-hide timing:** Containers re-hidden via `setTimeout(200ms)` after each reveal.
+- **Inert popups during search:** When a popup is opened by Cmd+F, it gets the `inert` attribute. Chrome's find-in-page (102+) skips inert subtrees entirely, so all matches go through search containers — no double-counting, no count fluctuations, no DOM text manipulation needed during search. `inert` is removed when search ends or popup closes normally.
+- **Popup close detection:** `selectionchange` listener detects when Chrome's find moves to a main-page match (selection lands outside popup) → closes the search-opened popup. Cmd+G/F3 keydown listener provides a backup check.
+- **Search idle timeout:** A 5-second idle timer auto-clears `searchActive` if no container reveals happen. This handles the case where the user closes the find bar (which fires no page events), ensuring stale search state doesn't persist across find sessions.
+- **Container deduplication:** A generation counter (`searchBuildGen`) ensures that when `buildSearchContainers` is called multiple times (e.g., during `restoreHighlights` retry loop), only the last call's async callback creates containers. Stale callbacks bail out.
 - **Nav widget:** `JR.navigateHighlight` now calls `JR.scrollToAndOpenPopup` internally — single source of truth for scroll-and-open behavior.
 
-### Step 8d: Nav Widget Should Not Count Unsent Highlights — DONE
+### Step 8e: Nav Widget Should Not Count Unsent Highlights — DONE
 - The highlight navigation widget currently increments the count (e.g. shows "1/5") as soon as a new highlight is created for a question that hasn't been sent yet
 - The nav widget should only count completed highlights — an unsent/in-progress highlight should not appear in the count or be navigable
 - Fix: filter out highlights that don't have a completed response when building the nav list
 
-### Step 8e: Delete Confirmation Bar Refinements — DONE
+### Step 8f: Delete Confirmation Bar Refinements — DONE
 - Move the cancel text slightly rightward
 - Make the confirm/cancel icons smaller
 - Confirmation bar pops/scales when user clicks outside (attention grab without red outline or fog overlay)
 
-### Step 8f: Export Highlights as Notes
+### Step 8g: Export Highlights as Notes
 - Add an export function where users can export their highlighted questions and responses as structured notes (e.g. markdown or plain text)
 - Accessible from the extension popup or a toolbar button
 - Not urgent — lower priority than other polish items
 
-### Step 8g: Hide Native "Ask ChatGPT" Button — DONE
+### Step 8h: Hide Native "Ask ChatGPT" Button — DONE
 - Small ✕ injected at the top-left edge of ChatGPT's native "Ask ChatGPT" selection button
 - MutationObserver detects when the native button appears and injects the ✕
 - Clicking it hides the native "Ask ChatGPT" button for the session; JR popups still work normally
@@ -225,6 +251,6 @@ Work through these steps **in order**. Do not skip ahead or add features from la
 - Recovers automatically on page reload (session-only, not persisted)
 - CSS tooltip on hover: "Hide — recovers on reload"
 
-### Step 8h: Logo & Description for Public Release
+### Step 8i: Logo & Description for Public Release
 - Design/decorate the extension logo for the Chrome Web Store
 - Write a polished store description and screenshots for public listing
