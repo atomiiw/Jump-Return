@@ -4,16 +4,6 @@
 
   var st = JR.state;
 
-  /** Flash the delete confirmation bar to draw attention back to it. */
-  JR.shineDeleteConfirm = function () {
-    if (!st.hoverToolbar || !st.hoverToolbar.classList.contains("jr-popup-confirm")) return;
-    var el = st.hoverToolbar;
-    el.classList.remove("jr-confirm-shine");
-    // Force reflow so re-adding the class restarts the animation
-    void el.offsetWidth;
-    el.classList.add("jr-confirm-shine");
-  };
-
   JR.createLoadingDiv = function () {
     var div = document.createElement("div");
     div.className = "jr-popup-loading";
@@ -274,15 +264,21 @@
       var scrollParent = JR.getScrollParent(contentContainer);
       if (scrollParent && scrollParent !== document.documentElement) {
         var containerRect = contentContainer.getBoundingClientRect();
-        // Absolute top the popup would land at inside the container
+        // Absolute position the popup edges would land at inside the container
         var aboveTop = highlightRect.top - containerRect.top - popupH - gap;
         var belowBottom = highlightRect.bottom - containerRect.top + gap + popupH;
         var scrollH = contentContainer.scrollHeight || contentContainer.offsetHeight;
         var canScrollToAbove = aboveTop >= 0;
-        var canScrollToBelow = belowBottom <= scrollH + 200; // generous margin
+        var canScrollToBelow = belowBottom <= scrollH;
 
         if (!canScrollToAbove && canScrollToBelow) return "below";
         if (!canScrollToBelow && canScrollToAbove) return "above";
+        // Neither fits in scroll space — prefer whichever clips less
+        if (!canScrollToAbove && !canScrollToBelow) {
+          var clipAbove = -aboveTop;         // how much is clipped above
+          var clipBelow = belowBottom - scrollH; // how much is clipped below
+          return clipBelow <= clipAbove ? "below" : "above";
+        }
       }
     }
 
@@ -432,6 +428,72 @@
     });
     ro.observe(popup);
     popup._jrAboveObserver = ro;
+  };
+
+  /**
+   * During streaming, check if the popup overflows the scroll container
+   * and flip direction (above↔below) if the other side has room.
+   * Called after each streaming content sync.
+   */
+  JR.checkStreamingOverflow = function () {
+    if (!st.activePopup || st.activeSourceHighlights.length === 0) return;
+    var popup = st.activePopup;
+    var contentContainer = popup.parentElement;
+    if (!contentContainer) return;
+
+    var direction = popup._jrLockedDirection || popup._jrDirection;
+    var popupH = popup.offsetHeight;
+    var gap = 8;
+    var containerRect = contentContainer.getBoundingClientRect();
+    var rect = JR.getHighlightRect(st.activeSourceHighlights);
+    var scrollH = contentContainer.scrollHeight || contentContainer.offsetHeight;
+
+    // Popup's absolute position inside the content container
+    var popupTop = parseFloat(popup.style.top) || 0;
+    var popupBottom = popupTop + popupH;
+
+    var overflows = false;
+    var newDirection;
+    if (direction === "below" && popupBottom > scrollH) {
+      // Check if above has room
+      var aboveTop = rect.top - containerRect.top - popupH - gap;
+      if (aboveTop >= 0) {
+        newDirection = "above";
+        overflows = true;
+      }
+    } else if (direction === "above" && popupTop < 0) {
+      // Check if below has room
+      var belowBottom = rect.bottom - containerRect.top + gap + popupH;
+      if (belowBottom <= scrollH) {
+        newDirection = "below";
+        overflows = true;
+      }
+    }
+
+    if (overflows && newDirection) {
+      popup._jrLockedDirection = newDirection;
+      popup._jrDirection = newDirection;
+
+      // Recalculate position with new direction
+      var adjRect = JR.getAdjacentLineRect(st.activeSourceHighlights, newDirection);
+      var centerRect = adjRect || rect;
+      var left = centerRect.left - containerRect.left + centerRect.width / 2 - popup.offsetWidth / 2;
+      var containerW = contentContainer.clientWidth;
+      left = Math.max(8, Math.min(left, containerW - popup.offsetWidth - 8));
+
+      var top;
+      if (newDirection === "above") {
+        top = rect.top - containerRect.top - popupH - gap;
+        popup._jrBottomAnchor = top + popupH;
+      } else {
+        top = rect.bottom - containerRect.top + gap;
+        popup._jrBottomAnchor = null;
+      }
+
+      popup.style.left = left + "px";
+      popup.style.top = top + "px";
+      JR.updateArrow(popup, centerRect, containerRect, left);
+    }
   };
 
   /**
@@ -1000,11 +1062,6 @@
       st.resizeHandler = prev.resizeHandler;
     }
     JR.syncHighlightActive(st.activeHighlightId);
-    // Hide toolbar when popup closes; re-show if popping back to a parent popup
-    JR.hideToolbar();
-    if (st.activeHighlightId) {
-      JR.showToolbar(st.activeHighlightId);
-    }
     JR.updateNavWidget();
   };
 })();

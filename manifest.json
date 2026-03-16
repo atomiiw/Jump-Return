@@ -17,6 +17,14 @@
         "https://chat.openai.com/*",
         "https://chatgpt.com/*"
       ],
+      "js": ["src/early-hide.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
       "js": [
         "storage.js",
         "src/jr-namespace.js",
@@ -26,6 +34,7 @@
         "src/chat.js",
         "src/popup-helpers.js",
         "src/popup.js",
+        "src/search.js",
         "content.js"
       ],
       "css": ["styles.css"],

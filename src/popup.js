@@ -179,8 +179,17 @@
 
   function resolveContentContainer(wrappers, isChained, entry) {
     if (entry) {
+      // For chained highlights, spans live inside a parent popup's response div,
+      // not an AI turn article. Derive container from the parent popup.
+      if (entry.spans && entry.spans[0]) {
+        var parentPopup = entry.spans[0].closest(".jr-popup");
+        if (parentPopup && parentPopup.parentElement && parentPopup.parentElement.isConnected) {
+          entry.contentContainer = parentPopup.parentElement;
+          return parentPopup.parentElement;
+        }
+      }
       var cc = entry.contentContainer;
-      if (cc && cc.isConnected) return cc;
+      if (cc && cc !== document.body && cc.isConnected) return cc;
       var aa = entry.spans[0] && entry.spans[0].closest(S.aiTurn);
       return aa ? aa.parentElement : document.body;
     }
@@ -298,8 +307,6 @@
         message += "\n\n(Ignore any previous instructions about brevity \u2014 respond normally.)";
       }
 
-      var turnsBefore = document.querySelectorAll(S.aiTurn).length;
-
       questionDiv.remove();
       // Re-add as non-editable question display
       var displayDiv = document.createElement("div");
@@ -319,16 +326,95 @@
       container.appendChild(displayDiv);
       popup.appendChild(loadingDiv);
 
-      var scrollAnchor = wrappers.length > 0
-        ? wrappers[0]
-        : (document.querySelector(S.aiTurn) || document.body);
-      var chatScrollParent = JR.getScrollParent(scrollAnchor);
-      var unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
+      // Register highlight immediately so it persists even if popup is dismissed
+      var sendHlId = crypto.randomUUID();
+      var sendItemId = crypto.randomUUID();
+      var sendAutoColor = (wrappers.length > 0 && wrappers[0]._jrAutoColor) || null;
+      var sourceArticle = wrappers.length > 0 ? wrappers[0].closest(S.aiTurn) : null;
+      var sourceTurnIdx = sourceArticle ? JR.getTurnNumber(sourceArticle) : -1;
+      var sendContentContainer;
+      if (sourceArticle) {
+        sendContentContainer = sourceArticle.parentElement;
+      } else if (parentId && wrappers.length > 0) {
+        // Chained highlight: spans are inside a parent popup, not an AI turn
+        var parentPopupEl = wrappers[0].closest(".jr-popup");
+        sendContentContainer = (parentPopupEl && parentPopupEl.parentElement) || contentContainer || document.body;
+      } else {
+        sendContentContainer = contentContainer || document.body;
+      }
 
-      JR.injectAndSend(message);
-      setTimeout(JR.repositionPopup, 300);
+      // Resolve parent's active item id so children are version-specific
+      var sendParentItemId = null;
+      if (parentId) {
+        var pEntry = st.completedHighlights.get(parentId);
+        if (pEntry && pEntry.items && pEntry.items.length > 0) {
+          var pIdx = pEntry.activeItemIndex != null ? pEntry.activeItemIndex : 0;
+          sendParentItemId = pEntry.items[pIdx] ? pEntry.items[pIdx].id : null;
+        }
+      }
 
-      JR.waitForResponse(popup, turnsBefore, text, sentence, blockTypes, unlockScroll, parentId, question);
+      for (var si = 0; si < wrappers.length; si++) {
+        wrappers[si].setAttribute("data-jr-highlight-id", sendHlId);
+        wrappers[si].classList.add("jr-source-highlight-done");
+      }
+
+      var pendingEntry = {
+        quoteId: sendHlId,
+        spans: wrappers.slice(),
+        responseHTML: "__PENDING__",
+        text: text,
+        sentence: sentence,
+        blockTypes: blockTypes,
+        question: question,
+        color: sendAutoColor,
+        contentContainer: sendContentContainer,
+        parentId: parentId || null,
+        parentItemId: sendParentItemId,
+        responseIndex: -1,
+        items: [{ id: sendItemId, question: question, responseHTML: "__PENDING__", questionIndex: -1, responseIndex: -1 }],
+        activeItemIndex: 0,
+      };
+      st.completedHighlights.set(sendHlId, pendingEntry);
+      st.activeHighlightId = sendHlId;
+
+      saveHighlight({
+        id: sendItemId,
+        quoteId: sendHlId,
+        text: text,
+        sentence: sentence,
+        blockTypes: blockTypes,
+        responseHTML: "__PENDING__",
+        question: question,
+        url: location.href,
+        site: "chatgpt",
+        parentId: parentId || null,
+        parentItemId: sendParentItemId,
+        sourceTurnIndex: sourceTurnIdx,
+        questionIndex: -1,
+        responseIndex: -1,
+        color: sendAutoColor,
+      });
+
+      JR.updateNavWidget();
+
+      var waitOpts = {
+        popup: popup, turnsBefore: 0, text: text, sentence: sentence,
+        blockTypes: blockTypes, unlockScroll: null, parentId: parentId, question: question,
+        preRegisteredHlId: sendHlId, preRegisteredItemId: sendItemId
+      };
+
+      JR.enqueueMessage({
+        message: message,
+        waitOpts: waitOpts,
+        beforeSend: function (w) {
+          w.turnsBefore = document.querySelectorAll(S.aiTurn).length;
+          var scrollAnchor = wrappers.length > 0
+            ? wrappers[0]
+            : (document.querySelector(S.aiTurn) || document.body);
+          var chatScrollParent = JR.getScrollParent(scrollAnchor);
+          w.unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
+        },
+      });
     }
 
     // Click send arrow → send with current default mode
@@ -457,28 +543,9 @@
     return toolbar;
   }
 
-  /**
-   * Show toolbar — now embedded inline in the popup, so this is a no-op.
-   * Kept for backward compatibility with callers.
-   */
+  // Toolbar is now inline in popups — these are no-ops kept for callers.
   JR.showToolbar = function () {};
-
-  /**
-   * Hide the floating toolbar.
-   */
-  /**
-   * Hide toolbar — now embedded inline in the popup, so this is a no-op.
-   */
   JR.hideToolbar = function () {};
-
-  /**
-   * Position the floating toolbar near the highlight.
-   * If a popup is open for this highlight, goes on the opposite side.
-   * Otherwise defaults to above the highlight.
-   */
-  /**
-   * Position toolbar — now inline, so this is a no-op.
-   */
   JR.positionToolbar = function () {};
 
 
@@ -679,7 +746,7 @@
         responseDiv.className = "jr-popup-response";
         responseDiv.innerHTML = v.responseHTML;
         popup.appendChild(responseDiv);
-        rebuildCodeBlocks(responseDiv, v.responseIndex || entry.responseIndex);
+        rebuildCodeBlocks(responseDiv);
 
         restoreChainedHighlights(responseDiv, hlId, entry.contentContainer, v.id);
       }
@@ -738,8 +805,9 @@
   function restoreChainedHighlights(responseDiv, parentQuoteId, contentContainer, activeParentItemId) {
     // Restore from in-memory entries — only children belonging to this version
     st.completedHighlights.forEach(function (chEntry, chQuoteId) {
+      if (chEntry._jrTemp) return; // skip in-progress (unsent) highlights
       if (chEntry.parentId !== parentQuoteId) return;
-      if (activeParentItemId && chEntry.parentItemId && chEntry.parentItemId !== activeParentItemId) return;
+      if (activeParentItemId && chEntry.parentItemId !== activeParentItemId) return;
       JR.restoreHighlightInElement(responseDiv, {
         quoteId: chQuoteId, text: chEntry.text, responseHTML: chEntry.responseHTML,
         sentence: chEntry.sentence, blockTypes: chEntry.blockTypes, question: chEntry.question,
@@ -799,16 +867,22 @@
       message += "\n\n(Ignore any previous instructions about brevity \u2014 respond normally.)";
     }
 
-    var turnsBefore = document.querySelectorAll(S.aiTurn).length;
+    var waitOpts = {
+      popup: popup, turnsBefore: 0, text: text, sentence: sentence,
+      blockTypes: entry.blockTypes, unlockScroll: null, parentId: entry.parentId,
+      question: newQuestion, editOpts: { hlId: hlId }
+    };
 
-    var scrollAnchor = entry.spans.length > 0 ? entry.spans[0] : document.body;
-    var chatScrollParent = JR.getScrollParent(scrollAnchor);
-    var unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
-
-    JR.injectAndSend(message);
-    setTimeout(JR.repositionPopup, 300);
-
-    JR.waitForResponse(popup, turnsBefore, text, sentence, entry.blockTypes, unlockScroll, entry.parentId, newQuestion, { hlId: hlId });
+    JR.enqueueMessage({
+      message: message,
+      waitOpts: waitOpts,
+      beforeSend: function (w) {
+        w.turnsBefore = document.querySelectorAll(S.aiTurn).length;
+        var scrollAnchor = entry.spans.length > 0 ? entry.spans[0] : document.body;
+        var chatScrollParent = JR.getScrollParent(scrollAnchor);
+        w.unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
+      },
+    });
   }
 
   function showCompletedResponse(popup, upper, id, entry, contentContainer) {
@@ -1004,12 +1078,12 @@
     var staleLoading = popup.querySelector(".jr-popup-loading");
     if (staleLoading) staleLoading.remove();
 
-    if (entry.responseHTML) {
+    if (entry.responseHTML && entry.responseHTML !== "__PENDING__") {
       var responseDiv = document.createElement("div");
       responseDiv.className = "jr-popup-response";
       responseDiv.innerHTML = entry.responseHTML;
       popup.appendChild(responseDiv);
-      rebuildCodeBlocks(responseDiv, entry.responseIndex);
+      rebuildCodeBlocks(responseDiv);
 
       // Restore chained highlights — only those belonging to the active version
       var activeItem = (entry.items && entry.items.length > 0)
@@ -1159,6 +1233,10 @@
     var contentContainer = resolveContentContainer(wrappers, isChained, entry);
     if (getComputedStyle(contentContainer).position === "static") {
       contentContainer.style.position = "relative";
+    }
+    // Keep entry's contentContainer reference fresh
+    if (entry) {
+      entry.contentContainer = contentContainer;
     }
 
     // --- Position ---

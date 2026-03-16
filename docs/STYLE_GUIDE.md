@@ -244,6 +244,47 @@ This covers ChatGPT's dark mode toggle. Other sites may need additional selector
 - `font-size: 13px`, `color: var(--jr-text-muted)`, centered, `white-space: nowrap`
 - Shows "2 / 5" when a highlight is focused, or just "5" when no highlight is active
 
+## Icon & UI Color Reference
+
+Sorted list of colors used for icons and UI elements across all states.
+
+### Icon States
+
+| State | Color | Hex | Used by |
+|---|---|---|---|
+| **Disabled** | Light gray | `#e5e5e5` | Nav arrows (disabled), send button (disabled via `#9ea0a7`) |
+| **Inactive (idle)** | Muted gray | `#919797` | Quote arrow icon, search bar icons, prev/next buttons, chevron |
+| **Active (default)** | Black | `#191414` | Nav arrows, version arrows, send button, delete button, toolbar delete |
+| **Active (hovered)** | Black + scale | `#191414` + `scale(1.25)` | Version arrows hover, send hover, delete hover, nav arrows `scale(1.3)` |
+| **Active (clicked/pressed)** | Black | `#191414` | Pencil edit button active state |
+| **Destructive (hovered)** | Red | `#ef4444` | Trash/delete icon on hover |
+| **Disabled (version arrows)** | Gray | `#c0c0c0` | Version prev/next disabled |
+| **Disabled (nav arrows)** | Gray + faded | `#c0c0c0` + `opacity: 0.35` | Nav widget up/down disabled |
+
+### UI Surface Colors
+
+| Element | Color | Hex | Notes |
+|---|---|---|---|
+| **Quote background** | Light gray | `#e5e5e5` | `.jr-popup-highlight-inner` background |
+| **Quote arrow icon** | Muted gray | `#919797` | Reply arrow (↩) in top-left of quote block |
+| **Question chevron** | Black | `#191414` (inherits from `--jr-text`) | `▶` chevron before question text |
+| **Nav indicator text** | Muted | `var(--jr-text-muted)` / `#919797` | "2 / 5" counter in nav widget |
+| **Version indicator text** | Muted | `var(--jr-text-muted)` / `#919797` | Version counter in popup |
+| **Popup background** | White | `var(--jr-bg)` / `#ffffff` | Upper card and response card |
+| **Popup border** | Light gray | `var(--jr-border)` / `#e5e5e5` | Popup border, separator lines |
+| **Search match** | Chrome yellow + black text | `#FFEA00` / `#000000` | Non-focused search match |
+| **Search match (focused)** | Black + chrome yellow text | `#000000` / `#FFEA00` | Active/focused search match |
+
+### Highlight Colors (source text on page)
+
+| Color | Default | Hover | Active |
+|---|---|---|---|
+| **Blue** | `#4100F5` | `#3600CC` | `#3600CC` |
+| **Yellow** | `#CDF564` | `#b8e050` | `#b8e050` |
+| **Green** | `#9BF0E1` | `#7ae0ce` | `#7ae0ce` |
+| **Pink** | `#F037A5` | `#d42a8e` | `#d42a8e` |
+| **Purple/Red** | `#FF4632` | `#e63020` | `#e63020` |
+
 ## Naming Convention
 All classes follow the pattern: `.jr-<component>-<element>`
 - `.jr-popup` — the container

@@ -32,6 +32,12 @@
       return;
     }
 
+    // Freeze the conversation scroll container before touching the input —
+    // prevents any ChatGPT-triggered scroll-to-bottom from causing a visible flicker.
+    var scrollAnchor = document.querySelector(S.aiTurn) || chatInput;
+    var scrollParent = JR.getScrollParent(scrollAnchor);
+    var savedScrollTop = scrollParent ? scrollParent.scrollTop : 0;
+
     chatInput.focus({ preventScroll: true });
 
     var dt = new DataTransfer();
@@ -42,11 +48,19 @@
       cancelable: true,
     }));
 
+    // Restore scroll position immediately after paste
+    if (scrollParent) scrollParent.scrollTop = savedScrollTop;
+
     var attempts = 0;
     function trySend() {
       var sendBtn = JR.findSendButton();
       if (sendBtn && !sendBtn.disabled) {
+        // Restore scroll once more right before click in case React shifted it
+        if (scrollParent) scrollParent.scrollTop = savedScrollTop;
         sendBtn.click();
+        chatInput.blur();
+        // One final restore after click
+        if (scrollParent) scrollParent.scrollTop = savedScrollTop;
         return;
       }
       attempts++;
@@ -62,6 +76,52 @@
     }
     requestAnimationFrame(trySend);
   };
+
+  // --- Message queue ---
+  // When ChatGPT is generating, new popup sends are queued and dispatched
+  // one-by-one as each generation completes.
+
+  /**
+   * Enqueue a message to be sent. If idle, sends immediately.
+   * @param {object} opts
+   * @param {string} opts.message - The injection message
+   * @param {object} opts.waitOpts - Args for JR.waitForResponse (popup, turnsBefore, text, sentence, blockTypes, unlockScroll, parentId, question, editOpts)
+   * @param {function} [opts.beforeSend] - Called right before injection (UI setup: show loading, lock scroll, etc.). Receives opts.waitOpts and should mutate it (e.g. set turnsBefore).
+   */
+  JR.enqueueMessage = function (opts) {
+    if (JR.isGenerating() || st.responseWatchActive) {
+      st.messageQueue.push(opts);
+      return;
+    }
+    sendQueued(opts);
+  };
+
+  function sendQueued(opts) {
+    if (opts.beforeSend) opts.beforeSend(opts.waitOpts);
+    JR.injectAndSend(opts.message);
+    var w = opts.waitOpts;
+    JR.waitForResponse(w.popup, w.turnsBefore, w.text, w.sentence, w.blockTypes, w.unlockScroll, w.parentId, w.question, w.editOpts, w.preRegisteredHlId, w.preRegisteredItemId);
+  }
+
+  /**
+   * Drain the next queued message after a generation completes.
+   * Called from captureResponse.
+   */
+  JR.drainQueue = function () {
+    if (st.messageQueue.length === 0) return;
+    var next = st.messageQueue.shift();
+    sendQueued(next);
+  };
+
+  // Fallback poller: if messages are queued but no responseWatch is active
+  // (e.g. user sent a question via ChatGPT's own input), poll until idle
+  // then drain.
+  setInterval(function () {
+    if (st.messageQueue.length === 0) return;
+    if (st.responseWatchActive) return;
+    if (JR.isGenerating()) return;
+    JR.drainQueue();
+  }, 300);
 
   // --- Response capture ---
 
@@ -181,7 +241,7 @@
     };
   };
 
-  JR.waitForResponse = function (popup, turnsBefore, text, sentence, blockTypes, unlockScroll, parentId, question, editOpts) {
+  JR.waitForResponse = function (popup, turnsBefore, text, sentence, blockTypes, unlockScroll, parentId, question, editOpts, preRegisteredHlId, preRegisteredItemId) {
     // Resolve the parent's active item id at call time (for parentItemId tracking)
     var parentItemId = null;
     if (parentId) {
@@ -274,6 +334,9 @@
       // Auto-scroll to bottom during streaming
       responseDiv.scrollTop = responseDiv.scrollHeight;
 
+      // Check if the popup overflows and needs to flip direction mid-stream
+      JR.checkStreamingOverflow();
+
       // Reposition "above" popups so the arrow stays anchored to the highlight
       // (popup grows upward as content streams in)
       if (targetPopup._jrLockedDirection === "above" || isNew) {
@@ -319,31 +382,36 @@
           return;
         }
 
-        detachedHlId = crypto.randomUUID();
-        var sourceArticle = detachedSpans[0].closest(S.aiTurn);
-        var contentContainer = sourceArticle ? sourceArticle.parentElement : document.body;
-        var detachColor = getAutoColor(detachedSpans);
-        for (var k = 0; k < detachedSpans.length; k++) {
-          detachedSpans[k].setAttribute("data-jr-highlight-id", detachedHlId);
-          detachedSpans[k].classList.add("jr-source-highlight-done");
-          if (detachColor) detachedSpans[k].classList.add("jr-highlight-color-" + detachColor);
+        if (preRegisteredHlId) {
+          // Use pre-registered entry from doSend
+          detachedHlId = preRegisteredHlId;
+        } else {
+          detachedHlId = crypto.randomUUID();
+          var sourceArticle = detachedSpans[0].closest(S.aiTurn);
+          var contentContainer = sourceArticle ? sourceArticle.parentElement : document.body;
+          var detachColor = getAutoColor(detachedSpans);
+          for (var k = 0; k < detachedSpans.length; k++) {
+            detachedSpans[k].setAttribute("data-jr-highlight-id", detachedHlId);
+            detachedSpans[k].classList.add("jr-source-highlight-done");
+            if (detachColor) detachedSpans[k].classList.add("jr-highlight-color-" + detachColor);
+          }
+          var detachEntry = {
+            quoteId: detachedHlId,
+            spans: detachedSpans.slice(),
+            responseHTML: null,
+            text: text,
+            sentence: sentence,
+            blockTypes: blockTypes,
+            question: question || null,
+            contentContainer: contentContainer,
+            parentId: parentId || null,
+            parentItemId: parentItemId || null,
+            items: [],
+            activeItemIndex: 0,
+          };
+          if (detachColor) detachEntry.color = detachColor;
+          st.completedHighlights.set(detachedHlId, detachEntry);
         }
-        var detachEntry = {
-          quoteId: detachedHlId,
-          spans: detachedSpans.slice(),
-          responseHTML: null,
-          text: text,
-          sentence: sentence,
-          blockTypes: blockTypes,
-          question: question || null,
-          contentContainer: contentContainer,
-          parentId: parentId || null,
-          parentItemId: parentItemId || null,
-          items: [],
-          activeItemIndex: 0,
-        };
-        if (detachColor) detachEntry.color = detachColor;
-        st.completedHighlights.set(detachedHlId, detachEntry);
 
         // Keep observer running — streaming continues in background
         if (unlockScroll) unlockScroll();
@@ -407,7 +475,7 @@
           url: location.href,
           site: "chatgpt",
           parentId: parentId || null,
-          parentItemId: memEntry ? memEntry.parentItemId : null,
+          parentItemId: (memEntry && memEntry.parentItemId) || parentItemId || null,
           sourceTurnIndex: memEntry ? (memEntry.spans && memEntry.spans[0] ? JR.getTurnNumber(memEntry.spans[0].closest(S.aiTurn)) : -1) : -1,
           questionIndex: qNum,
           responseIndex: rNum,
@@ -427,6 +495,7 @@
         JR.syncHighlightActive(hlId);
         JR.updateNavWidget();
         st.cancelResponseWatch = null;
+        JR.drainQueue();
         return;
       }
 
@@ -455,8 +524,13 @@
         var entry = st.completedHighlights.get(hlId2);
         if (entry) {
           entry.responseHTML = responseHTML;
-          // Populate items if not already set
-          if (!entry.items || entry.items.length === 0) {
+          entry.responseIndex = rNum2;
+          // Update pending items with real data
+          if (entry.items && entry.items.length > 0 && entry.items[0].responseHTML === "__PENDING__") {
+            entry.items[0].responseHTML = responseHTML;
+            entry.items[0].questionIndex = qNum2;
+            entry.items[0].responseIndex = rNum2;
+          } else if (!entry.items || entry.items.length === 0) {
             var detItemId = crypto.randomUUID();
             entry.items = [{ id: detItemId, question: question || null, responseHTML: responseHTML, questionIndex: qNum2, responseIndex: rNum2 }];
             entry.activeItemIndex = 0;
@@ -465,16 +539,35 @@
 
         if (st.activePopup && st.activeSourceHighlights.length > 0 &&
             st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId2) {
-          if (entry) entry.responseIndex = rNum2;
           st.activeHighlightId = hlId2;
           JR.syncHighlightActive(hlId2);
           JR.rebuildPopupAfterEdit(st.activePopup, hlId2);
+        }
+      } else if (preRegisteredHlId) {
+        // Update pre-registered pending entry with real response
+        hlId2 = preRegisteredHlId;
+        var preEntry = st.completedHighlights.get(hlId2);
+        if (preEntry) {
+          preEntry.responseHTML = responseHTML;
+          preEntry.responseIndex = rNum2;
+          if (preEntry.items && preEntry.items.length > 0) {
+            preEntry.items[0].responseHTML = responseHTML;
+            preEntry.items[0].questionIndex = qNum2;
+            preEntry.items[0].responseIndex = rNum2;
+          }
+        }
+        st.activeHighlightId = hlId2;
+        JR.syncHighlightActive(hlId2);
+
+        // Rebuild popup into completed view (editable question, version nav)
+        if (popup && popup.isConnected) {
+          JR.rebuildPopupAfterEdit(popup, hlId2);
         }
       } else {
         hlId2 = crypto.randomUUID();
         var itemId2 = crypto.randomUUID();
         if (spans.length > 0 && responseHTML) {
-          var contentContainer = popup.parentElement;
+          var contentContainer2 = popup.parentElement;
           for (var k = 0; k < spans.length; k++) {
             spans[k].setAttribute("data-jr-highlight-id", hlId2);
             spans[k].classList.add("jr-source-highlight-done");
@@ -489,7 +582,7 @@
             blockTypes: blockTypes,
             question: question || null,
             color: autoColor || null,
-            contentContainer: contentContainer,
+            contentContainer: contentContainer2,
             parentId: parentId || null,
             parentItemId: parentItemId || null,
             responseIndex: rNum2,
@@ -535,26 +628,49 @@
         ? spans[0].closest(S.aiTurn)
         : null;
       var sourceTurnIdx = sourceArticle ? JR.getTurnNumber(sourceArticle) : -1;
-      saveHighlight({
-        id: detached ? (entry && entry.items && entry.items[0] ? entry.items[0].id : crypto.randomUUID()) : itemId2,
-        quoteId: hlId2,
-        text: text,
-        sentence: sentence,
-        blockTypes: blockTypes,
-        responseHTML: responseHTML,
-        question: question || null,
-        url: location.href,
-        site: "chatgpt",
-        parentId: parentId || null,
-        parentItemId: parentItemId || null,
-        sourceTurnIndex: sourceTurnIdx,
-        questionIndex: qNum2,
-        responseIndex: rNum2,
-        color: autoColor2,
-      });
+
+      // Determine the item id to persist
+      var persistItemId;
+      if (preRegisteredItemId) {
+        persistItemId = preRegisteredItemId;
+      } else if (detached && entry && entry.items && entry.items[0]) {
+        persistItemId = entry.items[0].id;
+      } else {
+        persistItemId = itemId2;
+      }
+
+      if (preRegisteredItemId || (detached && preRegisteredHlId)) {
+        // Update the existing pending storage record
+        updateHighlightFields(persistItemId, {
+          responseHTML: responseHTML,
+          questionIndex: qNum2,
+          responseIndex: rNum2,
+          sourceTurnIndex: sourceTurnIdx,
+          color: autoColor2,
+        });
+      } else {
+        saveHighlight({
+          id: persistItemId,
+          quoteId: hlId2,
+          text: text,
+          sentence: sentence,
+          blockTypes: blockTypes,
+          responseHTML: responseHTML,
+          question: question || null,
+          url: location.href,
+          site: "chatgpt",
+          parentId: parentId || null,
+          parentItemId: parentItemId || null,
+          sourceTurnIndex: sourceTurnIdx,
+          questionIndex: qNum2,
+          responseIndex: rNum2,
+          color: autoColor2,
+        });
+      }
 
       JR.updateNavWidget();
       st.cancelResponseWatch = null;
+      JR.drainQueue();
     }
 
     /**
@@ -674,13 +790,22 @@
             var retryLoading = JR.createLoadingDiv();
             targetPopup.appendChild(retryLoading);
 
-            var retryTurnsBefore = document.querySelectorAll(S.aiTurn).length;
-            var scrollAnchor = document.querySelector(S.aiTurn) || document.body;
-            var chatScrollParent = JR.getScrollParent(scrollAnchor);
-            var retryUnlock = JR.lockScroll(chatScrollParent, scrollAnchor);
+            var retryWaitOpts = {
+              popup: targetPopup, turnsBefore: 0, text: text, sentence: sentence,
+              blockTypes: blockTypes, unlockScroll: null, parentId: parentId,
+              question: question, editOpts: editOpts
+            };
 
-            JR.injectAndSend(retryMessage);
-            JR.waitForResponse(targetPopup, retryTurnsBefore, text, sentence, blockTypes, retryUnlock, parentId, question, editOpts);
+            JR.enqueueMessage({
+              message: retryMessage,
+              waitOpts: retryWaitOpts,
+              beforeSend: function (w) {
+                w.turnsBefore = document.querySelectorAll(S.aiTurn).length;
+                var scrollAnchor = document.querySelector(S.aiTurn) || document.body;
+                var chatScrollParent = JR.getScrollParent(scrollAnchor);
+                w.unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
+              },
+            });
           });
           timeoutDiv.appendChild(retryBtn);
           targetPopup.appendChild(timeoutDiv);
@@ -691,26 +816,33 @@
             showTimeoutUI(popup);
           }
           st.cancelResponseWatch = null;
+          JR.drainQueue();
           return;
         }
         if (!detached) {
           showTimeoutUI(popup);
         }
         if (detached && detachedSpans) {
-          if (detachedHlId) st.completedHighlights.delete(detachedHlId);
-          for (var ds = 0; ds < detachedSpans.length; ds++) {
-            var span = detachedSpans[ds];
-            span.removeAttribute("data-jr-highlight-id");
-            span.classList.remove("jr-source-highlight-done");
-            var parent = span.parentNode;
-            if (!parent) continue;
-            while (span.firstChild) parent.insertBefore(span.firstChild, span);
-            parent.removeChild(span);
-            parent.normalize();
+          if (preRegisteredHlId) {
+            // Pre-registered highlight persists with __PENDING__ — don't remove
+            detachedSpans = null;
+          } else {
+            if (detachedHlId) st.completedHighlights.delete(detachedHlId);
+            for (var ds = 0; ds < detachedSpans.length; ds++) {
+              var span = detachedSpans[ds];
+              span.removeAttribute("data-jr-highlight-id");
+              span.classList.remove("jr-source-highlight-done");
+              var parent = span.parentNode;
+              if (!parent) continue;
+              while (span.firstChild) parent.insertBefore(span.firstChild, span);
+              parent.removeChild(span);
+              parent.normalize();
+            }
+            detachedSpans = null;
           }
-          detachedSpans = null;
         }
         st.cancelResponseWatch = null;
+        JR.drainQueue();
         return;
       }
 

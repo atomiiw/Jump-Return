@@ -40,12 +40,10 @@
       lastKnownUrl: location.href,
       customPopupWidthL1: null,         // session-persisted width for level-1 popups
       customPopupWidthChained: null,    // session-persisted width for chained (level 2+) popups
-      hoverToolbar: null,               // floating toolbar element
-      hoverToolbarHlId: null,           // highlight id the toolbar is showing for
-      hoverToolbarTimer: null,          // delayed hide timer
       confirmingDelete: false,          // true while delete confirmation is showing
       navWidget: null,                  // floating highlight navigation widget element
       askBtnHidden: false,              // session flag — hides ChatGPT's native "Ask ChatGPT" button
+      messageQueue: [],                  // queued messages waiting for generation to finish
     },
   };
 })();

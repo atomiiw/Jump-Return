@@ -499,6 +499,28 @@
       }
     }
 
+    // Fallback: case-insensitive match (selection may have captured different casing
+    // than what's rendered, e.g. CSS text-transform or rich text normalization)
+    if (idx === -1) {
+      idx = fullText.toLowerCase().indexOf(searchText.toLowerCase());
+      if (idx !== -1) {
+        // Use the DOM text length (might differ in case but same chars)
+        newlineMatched = false;
+      }
+    }
+
+    // Fallback: try trimmed searchText (selection sometimes captures trailing/leading spaces)
+    if (idx === -1) {
+      var trimmed = searchText.trim();
+      if (trimmed.length > 0 && trimmed !== searchText) {
+        idx = fullText.indexOf(trimmed);
+        if (idx !== -1) {
+          searchText = trimmed;
+          newlineMatched = false;
+        }
+      }
+    }
+
     // If not found, toolbar text inside <code> may be inflating the text.
     if (idx === -1) {
       var skipNodes = new Set();
@@ -525,6 +547,30 @@
       fullText = map2.fullText;
 
       idx = fullText.indexOf(searchText);
+      // Try whitespace-normalized match on toolbar-stripped text
+      if (idx === -1) {
+        var wsNorm2 = function (s) { return s.replace(/[\s\u00a0]+/g, " ").trim(); };
+        var normFull2 = wsNorm2(fullText);
+        var normSearch2 = wsNorm2(searchText);
+        var wsIdx2 = normFull2.indexOf(normSearch2);
+        // Also try case-insensitive
+        if (wsIdx2 === -1) wsIdx2 = normFull2.toLowerCase().indexOf(normSearch2.toLowerCase());
+        if (wsIdx2 !== -1) {
+          // Rebuild position map for this stripped fullText
+          var wsMap2 = [];
+          var ni2 = 0;
+          for (var wi2 = 0; wi2 < fullText.length && ni2 < normFull2.length; wi2++) {
+            if (normFull2[ni2] === fullText[wi2]) { wsMap2.push(wi2); ni2++; }
+            else if (/[\s\u00a0]/.test(fullText[wi2]) && normFull2[ni2] === " ") { wsMap2.push(wi2); ni2++; }
+          }
+          if (wsIdx2 < wsMap2.length) {
+            var wsEnd2 = wsIdx2 + normSearch2.length;
+            idx = wsMap2[wsIdx2];
+            var origEnd = wsEnd2 <= wsMap2.length ? wsMap2[wsEnd2 - 1] + 1 : idx + searchText.length;
+            newlineMatched = true;
+          }
+        }
+      }
       if (idx === -1) return null;
     }
 

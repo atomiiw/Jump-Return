@@ -85,6 +85,9 @@ async function getHighlights() {
 
   if (needsMigration) {
     highlights = migrateToQuoteIdFormat(highlights);
+  }
+
+  if (needsMigration) {
     await chrome.storage.local.set({ [STORAGE_KEY]: highlights });
   }
 
@@ -156,28 +159,6 @@ async function saveHighlight({ id, quoteId, text, sentence, blockTypes, response
  * @param {number} questionIndex
  * @param {number} responseIndex
  */
-async function linkQA(id, questionIndex, responseIndex) {
-  if (!isContextValid()) return null;
-  const highlights = await getHighlights();
-  const highlight = highlights.find((h) => h.id === id);
-  if (!highlight) return null;
-  highlight.questionIndex = questionIndex;
-  highlight.responseIndex = responseIndex;
-  await chrome.storage.local.set({ [STORAGE_KEY]: highlights });
-  return highlight;
-}
-
-/**
- * Get all items sharing the same quoteId, sorted by createdAt.
- * @param {string} quoteId
- */
-async function getItemsByQuoteId(quoteId) {
-  var highlights = await getHighlights();
-  return highlights
-    .filter(function (h) { return h.quoteId === quoteId; })
-    .sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-}
-
 /**
  * Get active child highlights (chained popups) for a given parent quoteId.
  * If parentItemId is provided, only returns children created in that specific version.
@@ -189,7 +170,7 @@ async function getChildHighlights(parentQuoteId, parentItemId) {
   const highlights = await getHighlights();
   return highlights.filter(function (h) {
     if (h.parentId !== parentQuoteId || !h.active) return false;
-    if (parentItemId && h.parentItemId && h.parentItemId !== parentItemId) return false;
+    if (parentItemId && h.parentItemId !== parentItemId) return false;
     return true;
   });
 }
@@ -234,16 +215,19 @@ async function deleteHighlight(quoteId) {
 }
 
 /**
- * Update the responseHTML of an existing item in storage.
+ * Update multiple fields on an existing highlight item by id.
  * @param {string} id - The item id
- * @param {string} responseHTML - The updated response HTML
+ * @param {object} fields - Key-value pairs to update
  */
-async function updateHighlightResponseHTML(id, responseHTML) {
+async function updateHighlightFields(id, fields) {
   if (!isContextValid()) return;
   const highlights = await getHighlights();
   const highlight = highlights.find(function (h) { return h.id === id; });
   if (!highlight) return;
-  highlight.responseHTML = responseHTML;
+  var keys = Object.keys(fields);
+  for (var i = 0; i < keys.length; i++) {
+    highlight[keys[i]] = fields[keys[i]];
+  }
   await chrome.storage.local.set({ [STORAGE_KEY]: highlights });
 }
 
@@ -287,15 +271,6 @@ async function countDescendants(quoteId) {
   }
   walk(quoteId);
   return visited.size;
-}
-
-/**
- * Get a single item by its id.
- * @param {string} id
- */
-async function getHighlight(id) {
-  var highlights = await getHighlights();
-  return highlights.find(function (h) { return h.id === id; }) || null;
 }
 
 /**
@@ -354,10 +329,3 @@ async function getDeletedTurns(url) {
   return all[url] || [];
 }
 
-/**
- * Clear all highlights.
- */
-async function clearAllHighlights() {
-  if (!isContextValid()) return;
-  await chrome.storage.local.set({ [STORAGE_KEY]: [] });
-}

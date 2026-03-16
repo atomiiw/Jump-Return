@@ -20,9 +20,9 @@
 
   document.addEventListener("mouseup", function (e) {
     if (e.target.closest(".jr-popup-disable-btn")) return;
+    if (e.target.closest(".jr-search-bar")) return;
     if (st.navWidget && st.navWidget.contains(e.target)) return;
     if (st.activePopup && st.activePopup.contains(e.target)) return;
-    if (st.hoverToolbar && st.hoverToolbar.contains(e.target)) return;
     if (st.activePopup) {
       var hlSpan = e.target.closest(".jr-source-highlight");
       if (hlSpan && st.activeSourceHighlights.indexOf(hlSpan) !== -1) {
@@ -38,8 +38,9 @@
   // --- Dismissal ---
 
   document.addEventListener("mousedown", function (e) {
-    // Ignore clicks on the "Ask ChatGPT" dismiss button — don't close our popup
+    // Ignore clicks on the "Ask ChatGPT" dismiss button or search bar
     if (e.target.closest(".jr-popup-disable-btn")) return;
+    if (e.target.closest(".jr-search-bar")) return;
     if (!st.activePopup && st.popupStack.length === 0) return;
     if (st.confirmingDelete) {
       // Click outside popup cancels delete confirmation
@@ -132,10 +133,12 @@
 
       // If there's a next span, collect rects from any inner highlight spans
       // sitting between this span and the next (wrapping case).
+      // Only include spans that belong to this same highlight (same hlId).
       if (i < entry.spans.length - 1) {
         var sib = span.nextElementSibling;
         while (sib && sib !== entry.spans[i + 1]) {
-          if (sib.classList.contains("jr-source-highlight-done")) {
+          if (sib.classList.contains("jr-source-highlight-done") &&
+              sib.getAttribute("data-jr-highlight-id") === hlId) {
             var innerRange = document.createRange();
             innerRange.selectNodeContents(sib);
             var iRects = innerRange.getClientRects();
@@ -283,16 +286,6 @@
    * Scroll the chat scroll parent so that the popup is vertically
    * centered in the viewport.
    */
-  var ownScrollActive = 0; // >0 while our code is scrolling (suppress scroll listener)
-
-  function markOwnScroll() {
-    ownScrollActive++;
-    // Scroll events may fire sync or async — cover both with rAF + setTimeout
-    requestAnimationFrame(function () {
-      setTimeout(function () { ownScrollActive = Math.max(0, ownScrollActive - 1); }, 50);
-    });
-  }
-
   function scrollPopupToCenter() {
     if (!st.activePopup) return;
     var popup = st.activePopup;
@@ -301,7 +294,6 @@
 
     function doScroll() {
       if (!popup.isConnected) return;
-      markOwnScroll();
       var popupRect = popup.getBoundingClientRect();
       var vpH = scrollParent === document.documentElement
         ? window.innerHeight
@@ -315,30 +307,6 @@
     // scroll which fires asynchronously after the observer callback.
     doScroll();
     requestAnimationFrame(doScroll);
-  }
-
-  /**
-   * Sync in-memory entry fields to a specific version (and persist).
-   */
-  function switchVersionInMemory(hlId, versionIdx) {
-    if (versionIdx == null) return;
-    var entry = st.completedHighlights.get(hlId);
-    if (!entry || !entry.items || entry.items.length <= 1) return;
-    var v = entry.items[versionIdx];
-    if (!v) return;
-    entry.activeItemIndex = versionIdx;
-    entry.question = v.question;
-    entry.responseHTML = v.responseHTML;
-    setActiveItem(hlId, v.id);
-  }
-
-  /**
-   * If the popup for hlId is already open, switch to the target
-   * version in a single DOM update (no arrow-click loop).
-   */
-  function switchVersionIfNeeded(hlId, versionIdx) {
-    if (versionIdx == null) return;
-    if (JR.switchPopupToVersion) JR.switchPopupToVersion(hlId, versionIdx);
   }
 
   /**
@@ -397,8 +365,10 @@
    *
    * @param {string} quoteId - The highlight's quoteId
    * @param {number} [itemIndex] - Optional item index to show (version)
+   * @param {object} [opts] - Options: { _skipScroll: true } to suppress scrollIntoView
    */
-  JR.openHighlight = function (quoteId, itemIndex) {
+  JR.openHighlight = function (quoteId, itemIndex, opts) {
+    opts = opts || {};
     var entry = st.completedHighlights.get(quoteId);
     if (!entry) return;
 
@@ -419,7 +389,7 @@
     JR.removeAllPopups();
     var l1Entry = st.completedHighlights.get(l1Id);
     if (!l1Entry) return;
-    if (l1Entry.spans && l1Entry.spans.length > 0) {
+    if (!opts._skipScroll && l1Entry.spans && l1Entry.spans.length > 0) {
       l1Entry.spans[0].scrollIntoView({ block: "center" });
     }
     JR.createPopup({ completedId: l1Id });
@@ -508,21 +478,28 @@
    *
    * @param {string} targetItemId - The target item's id
    */
-  JR.transitionTo = function (targetItemId) {
+  JR.transitionTo = function (targetItemId, onDone) {
+    // Every transition ends by centering the popup, then calling onDone.
+    function done() {
+      scrollPopupToCenter();
+      if (onDone) onDone();
+    }
+
     if (!targetItemId) {
       JR.removeAllPopups();
+      done();
       return;
     }
     var target = findItemById(targetItemId);
     if (!target) {
       console.warn("[JR] transitionTo: item not found:", targetItemId);
+      done();
       return;
     }
 
     var currentItemId = getCurrentItemId();
     if (currentItemId === targetItemId) {
-      // Already showing this item — just scroll to center
-      scrollPopupToCenter();
+      done();
       return;
     }
 
@@ -534,8 +511,7 @@
     if (currentQuoteId === targetQuoteId) {
       var entry = target.entry;
       var currentIdx = entry.activeItemIndex != null ? entry.activeItemIndex : 0;
-      scrollPopupToCenter();
-      flipVersions(targetQuoteId, entry, currentIdx, target.itemIndex, STEP_DELAY, scrollPopupToCenter);
+      flipVersions(targetQuoteId, entry, currentIdx, target.itemIndex, STEP_DELAY, done);
       return;
     }
 
@@ -561,6 +537,36 @@
     // Steps to open: open from commonLen up to target depth
     var openSteps = targetChain.slice(commonLen);
 
+    // --- Pre-compute version switches needed along the open path ---
+    // Each child in openSteps may require its parent to be at a specific
+    // version (identified by parentItemId). For entries that will be freshly
+    // created (not yet a popup), set activeItemIndex in-memory so createPopup
+    // renders the right version. For the common ancestor (already displayed),
+    // we must call switchPopupToVersion after peeling to update the DOM.
+    var ancestorSwitch = null; // { quoteId, version } — for the already-open common ancestor
+    for (var osi = 0; osi < openSteps.length; osi++) {
+      var childEnt = st.completedHighlights.get(openSteps[osi]);
+      if (!childEnt || !childEnt.parentItemId) continue;
+      var parentQid = childEnt.parentId;
+      var parentEnt = st.completedHighlights.get(parentQid);
+      if (!parentEnt || !parentEnt.items || parentEnt.items.length <= 1) continue;
+      for (var pvi = 0; pvi < parentEnt.items.length; pvi++) {
+        if (parentEnt.items[pvi].id !== childEnt.parentItemId) continue;
+        var curIdx = parentEnt.activeItemIndex != null ? parentEnt.activeItemIndex : 0;
+        if (curIdx === pvi) break; // already correct
+        if (commonLen > 0 && parentQid === targetChain[commonLen - 1]) {
+          // Parent is the common ancestor (popup already open) — need DOM switch after peeling
+          ancestorSwitch = { quoteId: parentQid, version: pvi };
+        } else {
+          // Parent will be freshly opened — set in-memory so createPopup uses the right version
+          parentEnt.activeItemIndex = pvi;
+          parentEnt.question = parentEnt.items[pvi].question;
+          parentEnt.responseHTML = parentEnt.items[pvi].responseHTML;
+        }
+        break;
+      }
+    }
+
     // Execute step by step with delays
     var stepIndex = 0;
     var totalPeelSteps = peelCount;
@@ -570,8 +576,21 @@
         // Peel one layer
         peelOne();
         stepIndex++;
-        setTimeout(doNextStep, STEP_DELAY);
-      } else if (openSteps.length > 0) {
+        // Only delay if there are more peels to animate;
+        // otherwise fall through immediately to open/finish.
+        if (stepIndex < totalPeelSteps) {
+          setTimeout(doNextStep, STEP_DELAY);
+          return;
+        }
+      }
+      if (openSteps.length > 0) {
+        // Switch the common ancestor's version if needed (after peeling, before opening children).
+        // This rebuilds its response div and restores child highlight spans via restoreChainedHighlights.
+        if (ancestorSwitch) {
+          if (JR.switchPopupToVersion) JR.switchPopupToVersion(ancestorSwitch.quoteId, ancestorSwitch.version);
+          ancestorSwitch = null;
+        }
+
         // Open layers one by one
         var childId = openSteps.shift();
         // First open step: if nothing is open (commonLen === 0),
@@ -582,7 +601,6 @@
             childEntry.spans[0].scrollIntoView({ block: "center" });
           }
           JR.createPopup({ completedId: childId });
-          scrollPopupToCenter();
         } else {
           // Wait a tick for chained highlights to restore in the response div
           setTimeout(function () {
@@ -590,7 +608,6 @@
             if (openSteps.length > 0) {
               setTimeout(doNextStep, STEP_DELAY);
             } else {
-              // Reached the target quoteId — now flip to the right version
               finishWithVersion();
             }
           }, 120);
@@ -608,14 +625,13 @@
     }
 
     function finishWithVersion() {
-      // If the target has a specific version, flip to it
       var entry2 = st.completedHighlights.get(targetQuoteId);
-      if (!entry2) return;
+      if (!entry2) { done(); return; }
       var currentIdx2 = entry2.activeItemIndex != null ? entry2.activeItemIndex : 0;
       if (currentIdx2 !== target.itemIndex) {
-        setTimeout(function () {
-          flipVersions(targetQuoteId, entry2, currentIdx2, target.itemIndex, STEP_DELAY, null);
-        }, STEP_DELAY);
+        flipVersions(targetQuoteId, entry2, currentIdx2, target.itemIndex, STEP_DELAY, done);
+      } else {
+        done();
       }
     }
 
@@ -671,13 +687,59 @@
 
   // --- SPA navigation ---
 
+  /**
+   * Update the early-hide <style> tag for the current URL so turns stay hidden
+   * during SPA navigation (the document_start script only fires on full loads).
+   */
+  function refreshEarlyHideStyle() {
+    var url = location.href;
+    try {
+    chrome.storage.local.get(["jumpreturn_highlights", "jumpreturn_deleted_turns"], function (result) {
+      var highlights = result.jumpreturn_highlights || [];
+      var deletedAll = result.jumpreturn_deleted_turns || {};
+      var deletedTurns = deletedAll[url] || [];
+      var turnSet = {};
+      for (var i = 0; i < highlights.length; i++) {
+        var h = highlights[i];
+        if (h.url !== url) continue;
+        if (h.questionIndex > 0) turnSet[h.questionIndex] = true;
+        if (h.responseIndex > 0) turnSet[h.responseIndex] = true;
+      }
+      for (var d = 0; d < deletedTurns.length; d++) {
+        if (deletedTurns[d] > 0) turnSet[deletedTurns[d]] = true;
+      }
+      var existing = document.getElementById("jr-early-hide");
+      var indices = Object.keys(turnSet);
+      if (indices.length === 0) {
+        if (existing) existing.remove();
+        return;
+      }
+      var rules = [];
+      for (var r = 0; r < indices.length; r++) {
+        rules.push('article[data-testid="conversation-turn-' + indices[r] + '"]');
+      }
+      var css = rules.join(",\n") + " { display: none !important; }";
+      if (existing) {
+        existing.textContent = css;
+      } else {
+        var style = document.createElement("style");
+        style.id = "jr-early-hide";
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
+      }
+    });
+    } catch (e) { /* extension context invalidated after reload */ }
+  }
+
   function onNavigate() {
     var currentUrl = location.href;
     if (currentUrl === st.lastKnownUrl) return;
     st.lastKnownUrl = currentUrl;
 
     JR.removeAllPopups();
+    JR.hideSearchBar();
     JR.hideToolbar();
+    st.messageQueue.length = 0;
     if (st.navWidget) {
       if (st.navWidget._jrScrollCleanup) st.navWidget._jrScrollCleanup();
       st.navWidget.remove();
@@ -700,7 +762,9 @@
       }
     });
     st.completedHighlights.clear();
+    refreshEarlyHideStyle();
     setTimeout(JR.restoreHighlights, 1000);
+    setTimeout(JR.initSearchBar, 1500);
   }
 
   window.addEventListener("popstate", onNavigate);
@@ -792,6 +856,9 @@
   // Restore saved highlights on initial page load
   JR.restoreHighlights();
 
+  // Init the always-visible search bar (delay for DOM to be ready)
+  setTimeout(JR.initSearchBar, 1500);
+
   // --- Expose console API to page's main world ---
   // Content scripts run in an isolated world; the browser console
   // runs in the main world. Bridge via CustomEvents on document.
@@ -802,6 +869,9 @@
   document.addEventListener("jr-open", function (e) {
     if (!e.detail) return;
     JR.openHighlight(e.detail.quoteId, e.detail.itemIndex);
+  });
+  document.addEventListener("jr-locate", function (e) {
+    JR.locate(e.detail || null);
   });
 
   // Bridge script (src/console-bridge.js) runs in MAIN world via manifest,

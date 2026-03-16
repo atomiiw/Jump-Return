@@ -71,7 +71,7 @@ html[class*="dark"] {
 /* Popup container — transparent shell, children are the visible cards */
 .jr-popup {
   position: absolute;
-  z-index: 50;
+  z-index: 1;
   width: 360px;
   background: none;
   border: none;
@@ -785,7 +785,7 @@ ol.jr-popup-context-list .jr-depth-2 {
 
 .jr-popup-version-prev:disabled,
 .jr-popup-version-next:disabled {
-  color: #9ea0a7;
+  color: #c0c0c0;
   opacity: 1;
   cursor: default;
 }
@@ -1281,4 +1281,115 @@ ol.jr-popup-context-list .jr-depth-2 {
   text-align: center;
   user-select: none;
   white-space: nowrap;
+}
+
+/* --- Search bar --- */
+
+.jr-search-bar {
+  position: fixed;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 14px 4px 10px;
+  background: transparent;
+  border: 1px solid var(--jr-border);
+  border-radius: 8px;
+  font-family: var(--jr-font);
+  z-index: 2147483647;
+  pointer-events: none;
+}
+
+.jr-search-bar > * {
+  pointer-events: auto;
+}
+
+.jr-search-icon {
+  display: flex;
+  align-items: center;
+  color: var(--jr-text-muted);
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+.jr-search-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.jr-search-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--jr-text);
+  font-size: 14px;
+  font-family: var(--jr-font);
+  width: 240px;
+  padding: 2px 4px;
+}
+
+.jr-search-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.jr-search-input::placeholder {
+  color: var(--jr-text-muted);
+}
+
+.jr-search-count {
+  font-size: 12px;
+  color: var(--jr-text-muted);
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+  user-select: none;
+  margin-right: 2px;
+}
+
+.jr-search-prev,
+.jr-search-next,
+.jr-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--jr-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.jr-search-prev:hover,
+.jr-search-next:hover,
+.jr-search-clear:hover {
+  color: var(--jr-text);
+  background: var(--jr-highlight-bg);
+}
+
+.jr-search-prev svg,
+.jr-search-next svg,
+.jr-search-clear svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* --- Search match highlights --- */
+
+.jr-search-mark {
+  background: #FFEA00;
+  color: #000000;
+  border-radius: 0;
+}
+
+.jr-search-mark-active {
+  background: #000000;
+  color: #FFEA00;
+  border-radius: 0;
 }
