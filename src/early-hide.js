@@ -33,7 +33,7 @@
 
     var rules = [];
     for (var r = 0; r < indices.length; r++) {
-      rules.push('article[data-testid="conversation-turn-' + indices[r] + '"]');
+      rules.push('[data-testid="conversation-turn-' + indices[r] + '"]');
     }
 
     var style = document.createElement("style");

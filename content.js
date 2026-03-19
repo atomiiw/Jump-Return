@@ -188,8 +188,8 @@
     if (!posParent) {
       posParent = entry.contentContainer;
       if (!posParent || !posParent.isConnected) {
-        var article = entry.spans[0].closest("article");
-        posParent = article ? article.parentElement : document.body;
+        var turnEl = entry.spans[0].closest(JR.SELECTORS.aiTurn);
+        posParent = turnEl ? turnEl.parentElement : document.body;
       }
     }
     var pRect = posParent.getBoundingClientRect();
@@ -727,7 +727,7 @@
       }
       var rules = [];
       for (var r = 0; r < indices.length; r++) {
-        rules.push('article[data-testid="conversation-turn-' + indices[r] + '"]');
+        rules.push('[data-testid="conversation-turn-' + indices[r] + '"]');
       }
       var css = rules.join(",\n") + " { display: none !important; }";
       if (existing) {

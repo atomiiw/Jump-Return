@@ -5,8 +5,8 @@
   window.JR = {
     // --- Constants ---
     SELECTORS: {
-      aiTurn: 'article[data-testid^="conversation-turn-"]',
-      aiLabel: "h6.sr-only",
+      aiTurn: '[data-testid^="conversation-turn-"]',
+      aiLabel: "h4.sr-only",
       chatInput: 'div[contenteditable="true"]',
       sendButton: 'button[data-testid="send-button"]',
       stopButton: 'button[data-testid="stop-button"]',

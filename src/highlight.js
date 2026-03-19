@@ -336,7 +336,7 @@
         var stillRemaining = [];
         for (var i = 0; i < remaining.length; i++) {
           var turn = document.querySelector(
-            'article[data-testid="conversation-turn-' + remaining[i] + '"]'
+            '[data-testid="conversation-turn-' + remaining[i] + '"]'
           );
           if (turn) {
             turn.classList.add("jr-hidden");
@@ -461,7 +461,7 @@
         var turnsStillRemaining = [];
         for (var ti = 0; ti < turnsRemaining.length; ti++) {
           var turn = document.querySelector(
-            'article[data-testid="conversation-turn-' + turnsRemaining[ti] + '"]'
+            '[data-testid="conversation-turn-' + turnsRemaining[ti] + '"]'
           );
           if (turn) {
             turn.classList.add("jr-hidden");
@@ -479,7 +479,7 @@
           if (st.completedHighlights.has(hl.quoteId)) continue;
 
           var sourceArticle = document.querySelector(
-            'article[data-testid="conversation-turn-' + hl.sourceTurnIndex + '"]'
+            '[data-testid="conversation-turn-' + hl.sourceTurnIndex + '"]'
           );
           if (!sourceArticle) {
             stillRemaining.push(hl);

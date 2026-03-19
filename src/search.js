@@ -23,11 +23,16 @@
 
   // --- Helpers ---
 
-  /** Strip HTML to plain text (cached per item id). */
+  /**
+   * Strip HTML to plain text (cached per item id).
+   * Runs rebuildCodeBlocks on the temp div so the extracted text matches
+   * what the popup DOM actually contains (toolbar text stripped, etc.).
+   */
   function stripHTML(html, cacheKey) {
     if (cacheKey && textCache[cacheKey]) return textCache[cacheKey];
     var div = document.createElement("div");
     div.innerHTML = html;
+    if (JR.wireCopyButtons) JR.wireCopyButtons(div);
     var text = div.textContent || "";
     if (cacheKey) textCache[cacheKey] = text;
     return text;
@@ -422,6 +427,12 @@
     }
     var entry = st.completedHighlights.get(m.quoteId);
     if (!entry) return null;
+
+    // Only apply marks for the version currently displayed in the popup.
+    // Other versions' offsets don't match the visible response text.
+    var activeIdx = entry.activeItemIndex != null ? entry.activeItemIndex : 0;
+    if (m.itemIndex != null && m.itemIndex !== activeIdx) return null;
+
     var popup = findPopupForQuoteId(m.quoteId);
     if (!popup) return null;
 
