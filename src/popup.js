@@ -302,9 +302,9 @@
       }
 
       if (mode === "brief") {
-        message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. This instruction applies to this single response only \u2014 do not carry it forward to any later messages.)";
+        message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
       } else {
-        message += "\n\n(Ignore any previous instructions about brevity \u2014 respond normally.)";
+        message += "\n\n(Ignore any previous instructions about brevity \u2014 respond at your normal length.)";
       }
 
       questionDiv.remove();
@@ -862,9 +862,9 @@
 
     var editMode = mode || "regular";
     if (editMode === "brief") {
-      message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. This instruction applies to this single response only \u2014 do not carry it forward to any later messages.)";
+      message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
     } else {
-      message += "\n\n(Ignore any previous instructions about brevity \u2014 respond normally.)";
+      message += "\n\n(Ignore any previous instructions about brevity \u2014 respond at your normal length.)";
     }
 
     var waitOpts = {
@@ -1339,5 +1339,10 @@
 
     showCompletedResponse(popup, upper, hlId, entry, entry.contentContainer);
     JR.repositionPopup();
+    // Also reposition on next frame in case pending layout/scroll changes
+    // (e.g. ChatGPT auto-scroll after unlock) shift the highlight spans.
+    requestAnimationFrame(function () {
+      JR.repositionPopup();
+    });
   };
 })();

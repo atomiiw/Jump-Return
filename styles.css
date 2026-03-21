@@ -570,16 +570,12 @@ ol.jr-popup-context-list .jr-depth-2 {
   margin-left: 4px;
   position: relative;
   border: none;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid #e5e5e5;
   padding-bottom: 2px;
   transition: border-color 0.15s ease;
 }
 
-.jr-popup-question-text:hover {
-  border-bottom-color: #e5e5e5;
-  cursor: text;
-}
-
+.jr-popup-question-text:hover,
 .jr-popup-question--editing .jr-popup-question-text,
 .jr-popup-question-text:focus {
   border-bottom-color: #191414;

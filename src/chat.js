@@ -518,14 +518,10 @@
       var responseHTML = null;
       var markdown2 = responseTurn.querySelector(S.responseContent);
       if (markdown2) responseHTML = markdown2.innerHTML;
-      if (detached) {
-        cleanup();
-      } else {
-        JR.repositionPopup();
-        JR.showResponseInPopup(popup, responseTurn);
-        cleanup();
-        JR.repositionPopup();
-      }
+      // Clean up scroll lock + observers. Skip the intermediate
+      // showResponseInPopup + repositionPopup — rebuildPopupAfterEdit
+      // (called below) will strip and rebuild the popup content anyway.
+      cleanup();
 
       var hlId2;
       var qNum2 = questionTurn ? JR.getTurnNumber(questionTurn) : -1;
@@ -794,9 +790,9 @@
               retryMessage = 'Regarding this part of your response:\n"' + text + '"\n\n' + question;
             }
             if (st.responseMode === "brief") {
-              retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. This instruction applies to this single response only \u2014 do not carry it forward to any later messages.)";
+              retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
             } else {
-              retryMessage += "\n\n(Ignore any previous instructions about brevity \u2014 respond normally.)";
+              retryMessage += "\n\n(Ignore any previous instructions about brevity \u2014 respond at your normal length.)";
             }
 
             var retryLoading = JR.createLoadingDiv();
