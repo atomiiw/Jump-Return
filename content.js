@@ -45,7 +45,7 @@
     triggerBtn = document.createElement("button");
     triggerBtn.type = "button";
     triggerBtn.className = "jr-highlight-trigger-btn";
-    triggerBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,44H40A20,20,0,0,0,20,64V224a19.82,19.82,0,0,0,11.56,18.12A20.14,20.14,0,0,0,40,244a19.87,19.87,0,0,0,12.81-4.73l.09-.08L84.94,212H216a20,20,0,0,0,20-20V64A20,20,0,0,0,216,44Zm-4,144H80a12,12,0,0,0-7.69,2.8L44,215.23V68H212Z"/></svg>';
+    triggerBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,36H40A20,20,0,0,0,20,56V184a20,20,0,0,0,20,20H98.11l12.52,21.92a20,20,0,0,0,34.74,0L157.89,204H216a20,20,0,0,0,20-20V56A20,20,0,0,0,216,36Zm-4,144H150.93a12,12,0,0,0-10.42,6.05L128,207.94l-12.51-21.89A12,12,0,0,0,105.07,180H44V60H212Z"/></svg>';
     triggerBtn.title = "Follow up";
     triggerBtn.setAttribute("aria-label", "Follow up on selection");
     triggerBtn.style.position = "fixed";

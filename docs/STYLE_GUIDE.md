@@ -1,9 +1,15 @@
 # Style Guide
 
 ## General Rules
-- All styles live in `styles.css` — no inline styles in JS (only computed `left`/`top` for positioning)
+- All styles live in `styles.css` — no inline styles in JS (only computed `left`/`top`/`width` for positioning)
 - Every class is prefixed with `jr-` to avoid collisions with host site styles
 - Use CSS custom properties (`--jr-*`) for all colors, radii, shadows, and fonts so theming is centralized
+- Single highlight color (brand blue) — no multi-color picker
+
+## Brand
+- **Blue:** `#1944f1` — the single brand/accent color
+- **White:** `#ffffff` — popup surfaces
+- Two-color system: blue for action/highlights, monochrome for everything else
 
 ## CSS Variables
 
@@ -11,23 +17,25 @@ Defined on `:root` and overridden for dark mode.
 
 | Variable | Light | Dark | Usage |
 |---|---|---|---|
-| `--jr-bg` | `#ffffff` | `#1e1e2e` | Popup & input background |
-| `--jr-border` | `#e0e0e0` | `#3a3a4a` | Borders |
-| `--jr-text` | `#1a1a1a` | `#e4e4e7` | Primary text |
-| `--jr-text-muted` | `#6b7280` | `#9ca3af` | Blockquote / secondary text |
-| `--jr-accent` | `#2563eb` | `#3b82f6` | Send button, focus ring |
-| `--jr-accent-hover` | `#1d4ed8` | `#2563eb` | Button hover state |
-| `--jr-highlight-bg` | `#f3f4f6` | `#2a2a3c` | Blockquote background |
-| `--jr-highlight-border` | `#d1d5db` | `#4a4a5a` | Blockquote left border |
-| `--jr-mark-bg` | `rgba(37,99,235,0.12)` | `rgba(59,130,246,0.2)` | Inline selection mark |
-| `--jr-radius` | `12px` | `12px` | Border radius |
-| `--jr-shadow` | light shadow | deeper shadow | Popup box shadow |
+| `--jr-bg` | `#ffffff` | `#1a1c22` | Popup & surface background |
+| `--jr-border` | `#e3e1e1` | `#2e3038` | Borders, separators |
+| `--jr-text` | `#191414` | `#e4e4e7` | Primary text |
+| `--jr-text-muted` | `#6b7280` | `#8b92a8` | Secondary text, idle icons |
+| `--jr-action` | `#1944f1` | `#5a7af7` | Brand blue — hover color, links, send button, focus |
+| `--jr-action-hover` | `#1539cc` | `#7b95f9` | Hover state for action-colored elements |
+| `--jr-highlight-bg` | `#edebeb` | `#232630` | Blockquote background, code bg fallback |
+| `--jr-highlight-border` | `#d7d5d5` | `#383b45` | Blockquote borders, question underline |
+| `--jr-radius` | `8px` | `8px` | Border radius for cards, popups, dropdowns |
+| `--jr-radius-pill` | `12px` | `12px` | Border radius for pill shapes (search bar base) |
+| `--jr-mark-bg` | `#1944f1` | `#1944f1` | Highlight color on page text (white text on blue) |
+| `--jr-mark-bg-hover` | `#1539cc` | `#3d5ef3` | Highlight hover (darker in light, lighter in dark) |
+| `--jr-mark-bg-active` | `#112fa8` | `#1539cc` | Highlight active (popup open) |
+| `--jr-shadow` | `0 4px 16px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06)` | `0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.2)` | Two-layer elevation shadow |
+| `--jr-focus-ring` | `rgba(25,68,241,0.25)` | `rgba(90,122,247,0.35)` | Focus-visible outline glow |
+| `--jr-link` | `#1944f1` | `#5a7af7` | Link color in response text |
 | `--jr-font` | system stack | system stack | Font family |
-| `--jr-color-blue` | `rgba(37,99,235,0.15)` | `rgba(37,99,235,0.25)` | Blue highlight color |
-| `--jr-color-yellow` | `rgba(234,179,8,0.15)` | `rgba(234,179,8,0.25)` | Yellow highlight color |
-| `--jr-color-green` | `rgba(34,197,94,0.15)` | `rgba(34,197,94,0.25)` | Green highlight color |
-| `--jr-color-pink` | `rgba(236,72,153,0.15)` | `rgba(236,72,153,0.25)` | Pink highlight color |
-| `--jr-color-purple` | `rgba(168,85,247,0.15)` | `rgba(168,85,247,0.25)` | Purple highlight color |
+| `--jr-icon-btn-size` | `16px` | `16px` | Icon size inside circle buttons |
+| `--jr-icon-btn-circle` | `36px` | `36px` | Circle button diameter (trigger, search, trash) |
 
 ## Dark Mode
 Dark mode activates when the `<html>` element has class `dark` or any class containing `"dark"`:
@@ -35,255 +43,163 @@ Dark mode activates when the `<html>` element has class `dark` or any class cont
 html.dark,
 html[class*="dark"] { ... }
 ```
-This covers ChatGPT's dark mode toggle. Other sites may need additional selectors in the future.
+Dark mode uses neutral-cool dark backgrounds with a subtle blue undertone (not purple). The brand blue `#1944f1` is used directly for highlights; a lighter `#5a7af7` is used for interactive elements to maintain WCAG AA contrast.
+
+## Hover System
+
+All interactive elements use **scale on hover** with a unified 3-tier system:
+
+| Tier | Scale | Used by |
+|---|---|---|
+| **Subtle** (large elements, text) | `1.08` | Circle buttons (trigger, search, trash), reply button, dropdown items |
+| **Medium** (inline icons) | `1.2` | Send arrow, edit pencil, version arrows, search prev/next |
+| **Firm** (small icons, nav) | `1.3` | Nav arrows, confirm icons, disable × |
+
+All hover transitions use `0.15s ease`. Press/active states use `scale(1.35)` for confirm buttons, `scale(0.97)` for the send button.
+
+### Hover Color Rules
+- **Action elements** (trigger, search, pencil, send, nav, version, reply, dropdown items, search arrows): idle `--jr-text-muted` → hover `--jr-action` (blue)
+- **Destructive** (trash, danger confirm): idle `--jr-text-muted` → hover `#ef4444` (red)
+- **Utility** (disable ×): idle `--jr-text-muted` → hover `--jr-action` (blue)
+- **Question underline**: idle `--jr-highlight-border` → hover/focus `--jr-action` (blue)
 
 ## Components
 
+### Circle Buttons (`.jr-highlight-trigger-btn`, `.jr-search-bar--ready`, `.jr-toolbar-delete`)
+- `var(--jr-icon-btn-circle)` diameter (36px), `border-radius: 50%`
+- `1px solid var(--jr-border)`, `background: var(--jr-bg)`, `box-shadow: var(--jr-shadow)`
+- Icon: `var(--jr-icon-btn-size)` (16px), `color: var(--jr-text-muted)`
+- Hover: `color: var(--jr-action)`, `scale: 1.08` (trash: `color: #ef4444`)
+- Trigger button: positioned fixed near selection, dismissed on scroll/click-outside/Escape
+- Search button: positioned fixed at top-center of chat column
+- Trash button: floats at `top: -14px; right: -14px` of popup
+
 ### `.jr-popup`
-- `position: absolute`, `z-index: 999999`
-- 360px wide, 14px padding, 12px border radius
-- Subtle fade-in animation (`jr-fade-in`, 0.15s ease-out)
-- Only `left` and `top` are set via JS; everything else is in CSS
+- `position: absolute`, `z-index: 99`
+- `min(360px, calc(100vw - 32px))` wide, `border-radius: var(--jr-radius)` (8px)
+- `1px solid var(--jr-border)`, `background: var(--jr-bg)`, `box-shadow: var(--jr-shadow)`
+- Fade-in animation (`jr-fade-in`, 0.15s ease-out)
+- Only `left`, `top`, and `width` are set via JS
 
 ### `.jr-popup-arrow`
-- Positioned absolutely inside `.jr-popup`, `pointer-events: none`
-- 18px wide, 9px tall — subtle but visible
-- Two pseudo-elements: `::before` (outer border triangle in `--jr-border`) and `::after` (inner fill triangle in `--jr-bg`, offset 1px inward)
-- `.jr-popup-arrow--up` — sits at `top: -9px`; uses `border-bottom` triangles; shown when popup is below the highlight
-- `.jr-popup-arrow--down` — sits at `bottom: -9px`; uses `border-top` triangles; shown when popup is above the highlight
-- Horizontal `left` set by JS (`JR.updateArrow`) to track highlight center, clamped to `[12, popupWidth - 30]`
+- 18px wide, 9px tall CSS triangle
+- Two pseudo-elements: `::before` (border color) and `::after` (fill color, offset 2px)
+- `.jr-popup-arrow--up` at `top: -9px`, `.jr-popup-arrow--down` at `bottom: -9px`
+- Horizontal `left` set by JS to track highlight center
 
 ### `.jr-popup-highlight`
-- Blockquote-style display of the selected text
-- 3px solid left border using `--jr-highlight-border`
-- Muted text color, 13px font size, `word-break: break-word`
-
-### `.jr-popup-context-list`
-- List rendered inside the blockquote for both single-block (first sentence of bullet) and multi-block selections across list items
-- Created as `<ul>` for bullet lists or `<ol>` for numbered lists, matching the original content
-- `margin: 0`, `padding-left: 1.2em`; explicit `list-style-type` overrides ChatGPT's CSS reset (`list-style: none` on `<ul>`)
-- `<ol>` uses `start` attribute to preserve original ordinal numbers (e.g. item 4 shows as "4." not "1.")
-- Depth classes (`jr-depth-1`, `jr-depth-2`) provide indentation and alternate marker styles
-  - `ul`: disc → circle → square
-  - `ol`: decimal → lower-alpha → lower-roman
-- `jr-li-cont` class on continuation items (same `<li>`, second `<p>`) suppresses the bullet marker
-
-### `.jr-popup-context-block`
-- Block-level `<div>` wrapper for paragraphs and headings in mixed list/non-list content
-- `margin-bottom: 6px` (last child 0)
-- `.jr-popup-context-heading` variant: `font-weight: 600`, primary text color
-
-### `.jr-edit-send-wrapper`
-- Relative container for the send arrow icon and its hover dropdown
-- `flex-shrink: 0`, positioned to the right of the question text
-
-### `.jr-popup-edit-send`
-- Send arrow SVG icon used for both initial questions and editing existing questions
-- `24px × 24px`, `color: var(--jr-accent)`, hover: `background: var(--jr-highlight-bg)`
-- `:disabled` — `color: var(--jr-text-muted)`, `opacity: 0.35`, greyed out when input is empty or unchanged
-
-### `.jr-edit-send-dropdown`
-- `position: absolute`, anchored below the send icon (`top: 100%`), `padding-top: 4px` as invisible hover bridge
-- Shown on hover of `.jr-edit-send-wrapper` when not disabled (`.jr-disabled` class prevents show)
-- Inner `.jr-edit-send-dropdown-menu` — `background: var(--jr-bg)`, `border: 1px solid var(--jr-border)`, `border-radius: 8px`, `white-space: nowrap`
-
-### `.jr-edit-send-dropdown-item`
-- `padding: 5px 10px`, `font-size: 12px`, `cursor: pointer`
-- Hover: `background: var(--jr-highlight-bg)`
-- Two items: "Brief" and "Elaborate"
+- Blockquote display of selected text context
+- `.jr-popup-highlight-inner`: `background: var(--jr-highlight-bg)`, `border-radius: var(--jr-radius)`, `padding: 10px 10px 10px 32px`
+- ↩ reply icon as `::before` pseudo at `top: 10px; left: 10px` (14px, `--jr-text-muted`)
 
 ### `.jr-popup-mark`
-- Inline `<span>` within the blockquote that highlights the exact selection
-- `background: var(--jr-mark-bg)` — subtle accent-colored background
-- `border-radius: 2px`, `padding: 1px 0`
-- Always rendered when sentence context is available — wraps the entire text when the selection equals the full sentence
-
-### `.jr-popup-pill`
-- Inline `<span>` for citation references detected via `data-testid="webpage-citation-pill"`
-- Boxed appearance: `border: 1px solid var(--jr-border)`, `border-radius: 4px`, `padding: 1px 5px`
-- Slightly smaller font (`0.85em`) with `--jr-highlight-bg` background
-- Visually separates citation references from surrounding sentence text
-- Can overlap with `.jr-popup-mark` when a citation is inside the highlighted selection
+- Inline highlight of the exact selected text within the blockquote
+- `background: var(--jr-mark-bg)`, `color: #fff`, no border-radius
 
 ### `.jr-source-highlight`
-- Inline `<span>` wrapping text nodes in the AI response to create a persistent "shadow highlight"
-- `background: var(--jr-mark-bg)` — same subtle accent tint as `.jr-popup-mark` for visual consistency
-- `border-radius: 2px`
-- `user-select: text` — ensures text is natively selectable for copy even if the host site disables selection
-- Dynamically added when a popup opens from a selection; removed (unwrapped) when the popup is dismissed
-- Multiple spans may exist simultaneously when the selection spans multiple text nodes (e.g. across bold/italic boundaries)
+- Inline `<span>` wrapping highlighted text on the page
+- `background: var(--jr-mark-bg)`, `color: #fff`, `user-select: text`
+- `.jr-source-highlight-done`: persists after popup close, `cursor: pointer`, `transition: background 0.12s ease`
+- Hover: `--jr-mark-bg-hover`, Active (popup open): `--jr-mark-bg-active`
 
-### `.jr-source-highlight-done`
-- Added to `jr-source-highlight` spans after a response is captured, signaling the highlight is completed and clickable
-- `cursor: pointer` — indicates the highlight can be clicked to re-open the popup
-- `transition: background 0.12s ease` — smooth color transitions for hover/active states
-- Persists after popup dismiss (unlike plain `jr-source-highlight` which is unwrapped on dismiss for in-progress highlights)
-- Used as click target selector: `document.addEventListener("click", ...)` checks for this class
-- Each span also gets `data-jr-highlight-id` attribute linking to the in-memory `completedHighlights` Map
-- **Hover** (`:hover`): background darkens — uses `--jr-mark-bg-hover` (default) or `--jr-color-*-hover` (colored highlights)
-- **Active** (`.jr-source-highlight-active`): even darker background when popup is open — uses `--jr-mark-bg-active` or `--jr-color-*-active`; active overrides hover
-
-### `.jr-hidden`
-- Applied to conversation turns to hide injected Q&A from the main chat flow
-- `display: none !important` — ensures the turn is fully hidden regardless of host styles
-- Added/removed dynamically by the response capture logic
+### `.jr-highlight-underline`
+- 1.5px line under highlighted text, `background: var(--jr-action)` (blue)
 
 ### `.jr-popup-question`
-- Used for both initial question input and completed question display
-- `display: flex`, `align-items: flex-start`, `gap: 6px` — flex layout for question text + send/edit buttons
-- `margin-top: 10px`, `font-size: 16px`, `font-weight: 400`, primary text color, `line-height: 1.6`
-- Initial input: `.jr-popup-question-text` with `contenteditable="true"` + placeholder + `.jr-edit-send-wrapper` (send arrow where pencil would be)
-- Completed: `.jr-popup-question-text` (read-only) + `.jr-edit-send-wrapper` (hidden) + `.jr-popup-edit-btn` (pencil)
-- `.jr-popup-question-text[contenteditable="true"]` — `border-bottom: 1px solid var(--jr-border)`, focus: `border-bottom-color: var(--jr-accent)`
-- `.jr-popup-question-text[data-placeholder]:empty::before` — shows placeholder text in muted color via CSS `content: attr(data-placeholder)`
+- `16px` font, `line-height: 1.6`, flex layout with chevron + text + controls
+- `.jr-popup-question-text`: `border-bottom: 1.5px solid var(--jr-highlight-border)`, hover/focus → `var(--jr-action)`
+- Placeholder via `::before` with `content: attr(data-placeholder)`
+
+### Inline Icon Buttons (shared base)
+Edit pencil, send arrow, version arrows, search prev/next, confirm icons, nav arrows, disable × all share:
+- `display: flex; align-items: center; justify-content: center`
+- `border: none; background: none; padding: 0; cursor: pointer`
+- `color: var(--jr-text-muted); transition: color 0.15s ease, transform 0.15s ease`
+- SVG icons at 14px (standard) or 20px (nav arrows)
+- Hover: `color: var(--jr-action)` + tier-appropriate scale
 
 ### `.jr-popup-edit-btn`
-- Pencil SVG toggle button next to the question text in completed popups
-- `24px × 24px`, `padding: 4px`, no border, transparent background
-- `color: var(--jr-text-muted)`, hover: `color: var(--jr-text)`, `background: var(--jr-highlight-bg)`
-- SVG is `14px × 14px`, stroke-based pencil icon
-- Click toggles edit mode on/off — when active (pressed), question text becomes editable in place; when clicked again, changes are discarded and original text restored
-- `.jr-popup-edit-btn--active` — active state: `color: var(--jr-accent)`, `background: none` (blue, no backdrop)
-- `.jr-popup-edit-btn--active:hover` — `color: var(--jr-accent-hover)`, `background: var(--jr-highlight-bg)`
+- 24×24px, pencil icon toggle for editing question text
+- Active state: `color: var(--jr-text)`
+
+### `.jr-popup-edit-send`
+- 24×24px send arrow, `color: var(--jr-text)` idle (darker than muted — primary action)
+- Disabled: `color: var(--jr-text-muted)`, `opacity: 1`
+
+### `.jr-send-mode-dropdown`
+- Two-item dropdown ("Detailed" / "Concise") shown on hover of send wrapper
+- `background: var(--jr-bg)`, `1px solid var(--jr-border)`, `border-radius: var(--jr-radius)`, `box-shadow: var(--jr-shadow)`
+- `::after` pseudo creates 8px invisible hit area bridge
+- `.jr-send-mode-item`: `padding: 5px 14px`, `font-size: 13px`, `color: var(--jr-text-muted)`
+- `.jr-send-mode-item--active`: `color: var(--jr-text)`, `font-weight: 600`
 
 ### `.jr-popup-version-nav`
-- Navigation bar for switching between response versions, shown when `versions.length > 1`
-- `display: flex`, `align-items: center`, `justify-content: center`, `gap: 8px`, `margin-top: 8px`
-- Positioned between the question and the response
-
-### `.jr-popup-version-prev`, `.jr-popup-version-next`
-- `24px × 24px` arrow buttons (`◀` / `▶`)
-- `border: 1px solid var(--jr-border)`, `border-radius: 4px`, `background: var(--jr-bg)`
-- Hover: `background: var(--jr-highlight-bg)`; disabled: `opacity: 0.3`, no cursor
-
-### `.jr-popup-version-indicator`
-- `font-size: 13px`, `color: var(--jr-text-muted)`, `min-width: 40px`, centered
-- Shows "1 / 3" format — current version / total versions
-
-### `.jr-popup-loading`
-- Loading indicator shown inside the popup while waiting for the AI response
-- `padding: 12px 0 4px 0`, centered text
-- `font-size: 13px`, muted text color (`--jr-text-muted`)
-- Text content changes: "Waiting for response…" → "Response timed out." on timeout
+- Version prev/next arrows, 24×24px, `color: var(--jr-text)` idle
+- Disabled: `color: var(--jr-border)`, `opacity: 1`
+- `.jr-popup-version-indicator`: `font-size: 13px`, `color: var(--jr-text-muted)`
 
 ### `.jr-popup-response`
-- Container for the AI response content displayed inside the popup
-- `margin-top: 12px`, `padding-top: 12px`, separated by a top border (`--jr-border`)
-- `max-height: 350px` with `overflow-y: auto` for scrollable long responses
-- `font-size: 16px`, `line-height: 1.6`, `word-break: break-word`
-- `user-select: text` — ensures response text is selectable for chained popup highlighting even if the host site disables selection
-- **Markdown formatting** (Step 5b): targeted child rules restore spacing and visual structure for elements cloned from ChatGPT's rendered markdown:
-  - `p`: `margin: 0 0 1em 0` (last-child 0)
-  - `h1`–`h6`: `margin: 1.25em 0 0.5em 0`, `font-weight: 600`, `line-height: 1.3` (first-child margin-top 0)
-  - `hr`: `border: none; border-top: 1px solid var(--jr-border); margin: 1em 0`
-  - `pre`: background tint, 1px border, `border-radius: 6px`, `padding: 12px`, `overflow-x: auto`
-  - `code`: background tint, `border-radius: 3px`, `padding: 2px 4px`; `pre code` resets to inherit
-  - `blockquote`: 3px left border, background tint, muted text color
-  - `ul`/`ol`: `margin: 1em 0`, `padding-left: 1.5em`; explicit `list-style-type`
-  - `table`: `border-collapse: collapse`, `width: 100%`; `th`/`td` borders, padding; `th` background tint
-  - `a`: accent color, underline
-  - `img`: `max-width: 100%`, `height: auto`
+- `padding: 14px`, `border-top: 1px solid var(--jr-border)`
+- `max-height: min(350px, 50vh)`, `overflow-y: auto`
+- `font-size: 16px`, `line-height: 1.6`, `user-select: text`
+- Scroll fade edges via `::before`/`::after` sticky pseudo-elements with `box-shadow`
+- Markdown formatting: paragraphs, headings, code blocks, lists, tables, blockquotes, links, images
 
-### Resizable Popup (Step 5a)
-- Popups are resizable by dragging the left or right edge
-- 6px edge detection zone within the popup's 14px padding — does not overlap content areas
-- `col-resize` cursor shown on hover near edges; reverts on mouse leave
-- During drag: `document`-level `mousemove`/`mouseup` listeners track resize; `preventDefault` on initial mousedown prevents text selection
-- Minimum width: 280px; maximum width: `window.innerWidth - 32`
-- `customPopupWidth` (module-level variable) persists the last resized width for the page session
-- All popup creators (`createPopup`, `openCompletedPopup`, `createChainedPopup`) apply `customPopupWidth` as an inline `style.width` override
-- `positionPopup()` measures `popup.offsetWidth` from the DOM (after offscreen append) instead of using a hardcoded value
-- `repositionPopup()` and window resize handlers use `popup.offsetWidth` / `activePopup.offsetWidth`
+### `.jr-reply-whole-btn`
+- `display: inline-flex`, inside `.jr-popup-response` at the bottom
+- `font-size: 14px`, `color: var(--jr-text-muted)`, 14px reply arrow icon
+- Hover: `color: var(--jr-action)`, `scale(1.08)`
 
-### Highlight Toolbar (Step 7a)
+### `.jr-popup-loading`
+- `padding: 14px`, `border-top: 1px solid var(--jr-border)`, `min-height: 48px`
+- `font-size: 14px`, `color: var(--jr-text-muted)`, centered
 
-#### `.jr-popup-toolbar`
-- Floating bar near the highlighted text, separate from the popup: `position: absolute`, `z-index: 50`
-- Positioned on the opposite side of the highlight from the popup (popup below → toolbar above, and vice versa)
-- Pill-shaped: `border-radius: 20px`, `padding: 4px 8px`, `gap: 4px`
-- `background: var(--jr-bg)`, `border: 1px solid var(--jr-border)`, subtle shadow
-- Repositions on window resize, scroll, and popup reposition
+### `.jr-toolbar-delete` (floating circle)
+- `position: absolute; top: -14px; right: -14px`
+- Same circle button pattern as trigger/search
+- Hover: `color: #ef4444` (red), `scale(1.08)`
 
-#### `.jr-toolbar-swatch`
-- 18×18px color circles: `border-radius: 50%`, `cursor: pointer`, `border: 2px solid transparent`
-- `.jr-toolbar-swatch--active` → `border-color: var(--jr-text)`
-- Hover (non-active) → `border-color: var(--jr-text-muted)`
-- Color variants: `--blue`, `--yellow`, `--green`, `--pink`, `--purple` using `--jr-color-*` variables
+### Delete Confirmation
+- `.jr-popup-delete-confirm`: centered flex row with text + cancel ✕ + confirm ✓
+- `.jr-popup-confirm-text`: `font-size: 14px`
+- `.jr-popup-confirm-icon-btn`: 14px icons, hover `color: var(--jr-action)`, `scale(1.3)`
+- `.jr-popup-confirm-icon-btn--danger`: `color: #ef4444`, hover `#dc2626` (dark: `#f87171`)
 
-#### `.jr-toolbar-delete`
-- Trash icon button: `margin-left: auto` (pushed to right end), `color: var(--jr-text-muted)`
-- Hover: `color: #ef4444`, `background: var(--jr-highlight-bg)`
-- 16×16px SVG icon
+### `.jr-nav-widget`
+- `position: fixed`, `top: 50%`, `right: 80px`, `z-index: 999999`
+- Up/down arrows: 36×36px, 20px icons, `color: var(--jr-text-muted)` idle
+- Disabled: `color: var(--jr-border)`, `pointer-events: none`
+- `.jr-nav-indicator`: `font-size: 13px`, `color: var(--jr-text-muted)`
 
-#### `.jr-highlight-color-*`
-- Applied to `.jr-source-highlight` spans to override default `--jr-mark-bg` background
-- 5 classes: `-blue`, `-yellow`, `-green`, `-pink`, `-purple` → `var(--jr-color-*)` backgrounds
-- Color CSS variables: light mode `rgba(R,G,B, 0.15)`, dark mode `rgba(R,G,B, 0.25)`
+### Search Bar
+- **Ready state**: Circle button (matches trigger/search), `z-index: 999999`
+- **Active state**: 300×40px bar, `border-radius: var(--jr-radius)`, `padding: 0 4px 0 14px`, `font-size: 14px`
+- `animation: jr-fade-in 0.15s ease-out` on expand
+- `.jr-search-input`: inherits font, transparent bg, no border
+- `.jr-search-count`: `font-size: 12px`, `border-left: 1px solid var(--jr-border)` separator
+- Prev/next: 24×24px, 14px icons, `color: var(--jr-text)` enabled, `var(--jr-action)` hover
 
-#### `.jr-popup-confirm`
-- Centered overlay inside popup for delete confirmation
-- `display: flex`, `flex-direction: column`, `align-items: center`, `gap: 14px`, `padding: 20px 14px`
-- `.jr-popup-confirm-btn` — standard button with border, `.jr-popup-confirm-btn--danger` — red background
+### Search Marks
+- `.jr-search-mark`: `background: #fff500`, `color: #000` (yellow, non-active match)
+- `.jr-search-mark-active`: `background: #1944f1`, `color: #fff` (brand blue, active match)
 
-### Highlight Navigation Widget (Step 7d)
+## Icon Color Reference
 
-#### `.jr-nav-widget`
-- `position: fixed`, `top: 50%`, `right: 80px`, `transform: translateY(-50%)`, `z-index: 999999`
-- Vertical layout: `flex-direction: column`, `align-items: center`, `gap: 0`
-- No background, no border, no box shadow — transparent floating arrows
-- `animation: jr-fade-in 0.15s ease-out`
-- Contains up/down buttons and a position indicator
+| State | Color | Used by |
+|---|---|---|
+| **Idle** | `var(--jr-text-muted)` | All icon buttons, circle buttons, reply, dropdown items |
+| **Idle (primary)** | `var(--jr-text)` | Send arrow, version arrows, nav arrows (when enabled) |
+| **Hovered** | `var(--jr-action)` (blue) | All interactive elements except destructive |
+| **Destructive hover** | `#ef4444` | Trash button, danger confirm |
+| **Disabled** | `var(--jr-border)` | Version arrows, nav arrows when disabled |
+| **Active/pressed** | `var(--jr-text)` | Pencil edit active state |
 
-#### `.jr-nav-up`, `.jr-nav-down`
-- `36px × 36px`, no border/background, `color: #191414`, cursor pointer
-- SVG chevrons at `20px × 20px`
-- Hover (non-disabled): `transform: scale(1.3)`
-- `:disabled`: `color: #c0c0c0`, default cursor
-
-#### `.jr-nav-indicator`
-- `font-size: 13px`, `color: var(--jr-text-muted)`, centered, `white-space: nowrap`
-- Shows "2 / 5" when a highlight is focused, or just "5" when no highlight is active
-
-## Icon & UI Color Reference
-
-Sorted list of colors used for icons and UI elements across all states.
-
-### Icon States
-
-| State | Color | Hex | Used by |
-|---|---|---|---|
-| **Disabled** | Light gray | `#e5e5e5` | Nav arrows (disabled), send button (disabled via `#9ea0a7`) |
-| **Inactive (idle)** | Muted gray | `#919797` | Quote arrow icon, search bar icons, prev/next buttons, chevron |
-| **Active (default)** | Black | `#191414` | Nav arrows, version arrows, send button, delete button, toolbar delete |
-| **Active (hovered)** | Black + scale | `#191414` + `scale(1.25)` | Version arrows hover, send hover, delete hover, nav arrows `scale(1.3)` |
-| **Active (clicked/pressed)** | Black | `#191414` | Pencil edit button active state |
-| **Destructive (hovered)** | Red | `#ef4444` | Trash/delete icon on hover |
-| **Disabled (version arrows)** | Gray | `#c0c0c0` | Version prev/next disabled |
-| **Disabled (nav arrows)** | Gray + faded | `#c0c0c0` + `opacity: 0.35` | Nav widget up/down disabled |
-
-### UI Surface Colors
-
-| Element | Color | Hex | Notes |
-|---|---|---|---|
-| **Quote background** | Light gray | `#e5e5e5` | `.jr-popup-highlight-inner` background |
-| **Quote arrow icon** | Muted gray | `#919797` | Reply arrow (↩) in top-left of quote block |
-| **Question chevron** | Black | `#191414` (inherits from `--jr-text`) | `▶` chevron before question text |
-| **Nav indicator text** | Muted | `var(--jr-text-muted)` / `#919797` | "2 / 5" counter in nav widget |
-| **Version indicator text** | Muted | `var(--jr-text-muted)` / `#919797` | Version counter in popup |
-| **Popup background** | White | `var(--jr-bg)` / `#ffffff` | Upper card and response card |
-| **Popup border** | Light gray | `var(--jr-border)` / `#e5e5e5` | Popup border, separator lines |
-| **Search match** | Yellow + black text | `#fff500` / `#000000` | Non-focused search match |
-| **Search match (focused)** | Blue + white text | `#2a428c` / `#ffffff` | Active/focused search match |
-
-### Highlight Colors (source text on page)
-
-| Color | Default | Hover | Active |
-|---|---|---|---|
-| **Blue** | `#4100F5` | `#3600CC` | `#3600CC` |
-| **Yellow** | `#CDF564` | `#b8e050` | `#b8e050` |
-| **Green** | `#9BF0E1` | `#7ae0ce` | `#7ae0ce` |
-| **Pink** | `#F037A5` | `#d42a8e` | `#d42a8e` |
-| **Purple/Red** | `#FF4632` | `#e63020` | `#e63020` |
+## Accessibility
+- All icon-only buttons have `aria-label` attributes
+- `focus-visible` outline: `2px solid var(--jr-action)`, `offset: 2px` on all interactive elements
+- `--jr-text-muted` (#6b7280) passes WCAG AA on white (4.63:1)
+- White on brand blue passes WCAG AA (6.69:1)
+- `@media (prefers-reduced-motion: reduce)` kills all animations/transitions
 
 ## Naming Convention
 All classes follow the pattern: `.jr-<component>-<element>`
@@ -291,3 +207,7 @@ All classes follow the pattern: `.jr-<component>-<element>`
 - `.jr-popup-highlight` — the blockquote inside the popup
 - `.jr-popup-question` — the question input / display row
 - `.jr-popup-edit-send` — the send arrow icon
+- `.jr-highlight-trigger-btn` — the chat bubble circle button
+- `.jr-toolbar-delete` — the trash circle button
+- `.jr-reply-whole-btn` — the reply to response button
+- `.jr-search-bar` — the search bar (with `--ready` and `--active` modifiers)

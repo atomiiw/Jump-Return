@@ -139,7 +139,6 @@ html[class*="dark"] {
 .jr-highlight-trigger-btn svg {
   width: var(--jr-icon-btn-size);
   height: var(--jr-icon-btn-size);
-  transform: translateY(-6.2%);
 }
 
 .jr-highlight-trigger-btn:hover {
@@ -944,7 +943,6 @@ html[class*="dark"] .jr-popup-confirm-icon-btn--danger:hover { color: #f87171; }
 .jr-search-active-icon svg {
   width: var(--jr-icon-btn-size);
   height: var(--jr-icon-btn-size);
-  transform: translateX(-3.9%);
 }
 
 /* Ready state (circle) */
