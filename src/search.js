@@ -4,6 +4,14 @@
 
   var st = JR.state;
 
+  /** Get the horizontal center of the chat column, or null. */
+  function getChatColCenter() {
+    var el = document.querySelector('[class*="react-scroll-to-bottom"]') || document.querySelector('main');
+    if (!el) return null;
+    var r = el.getBoundingClientRect();
+    return r.left + r.width / 2;
+  }
+
   // --- SVGs ---
   var SEARCH_SVG = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.49,215.51,185,168a92.12,92.12,0,1,0-17,17l47.53,47.54a12,12,0,0,0,17-17ZM44,112a68,68,0,1,1,68,68A68.07,68.07,0,0,1,44,112Z"/></svg>';
   var DOWN_SVG = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159l71.51-71.52a12,12,0,0,1,17,17Z"/></svg>';
@@ -119,6 +127,7 @@
             return { id: it.id, question: it.question, responseHTML: it.responseHTML, questionIndex: it.questionIndex, responseIndex: it.responseIndex };
           }),
           activeItemIndex: activeIdx,
+          wholeResponse: !!items[0].wholeResponse,
         });
       }
     }
@@ -209,6 +218,7 @@
           while (ri < respMatches.length || ci < childGroups.length) {
             var rOff = ri < respMatches.length ? respMatches[ri].offset : Infinity;
             var cOff = ci < childGroups.length ? childGroups[ci].offset : Infinity;
+            if (rOff === Infinity && cOff === Infinity) break;
             if (rOff <= cOff) {
               out.push(respMatches[ri].match);
               ri++;
@@ -217,6 +227,12 @@
               for (var co = 0; co < childOut.length; co++) out.push(childOut[co]);
               ci++;
             }
+          }
+          // Process any remaining children not reached by interleave (e.g. reply-to-all
+          // whose text isn't a substring of the parent response → Infinity offset)
+          for (; ci < childGroups.length; ci++) {
+            var tailOut = popupMatchesForEntry(childGroups[ci].childQid, childGroups[ci].childEnt);
+            for (var to2 = 0; to2 < tailOut.length; to2++) out.push(tailOut[to2]);
           }
         } else {
           // No response yet — just recurse into children
@@ -594,16 +610,6 @@
 
   function doAfterCollect(query) {
     if (matches.length > 0) {
-      // Log the ordered navigation plan
-      console.log("[JR search] \"" + query + "\" — " + matches.length + " matches in order:");
-      for (var li = 0; li < matches.length; li++) {
-        var m = matches[li];
-        if (m.field === "page") {
-          console.log("  " + (li + 1) + ". PAGE turn " + m.turnIndex + " offset " + m.offset);
-        } else {
-          console.log("  " + (li + 1) + ". POPUP " + m.field + " [" + (m.quoteId || "").slice(0, 8) + "…] offset " + m.offset);
-        }
-      }
       matchIndex = 0;
       navigateToMatch(0);
     } else {
@@ -647,6 +653,9 @@
   function enterReadyState() {
     if (!searchBar) return;
     searchBar.className = "jr-search-bar jr-search-bar--ready";
+    var cc = getChatColCenter();
+    if (cc != null) searchBar.style.left = (cc - 18) + "px";
+    searchBar.style.top = "8px";
     // Clear search state
     if (searchInput) searchInput.value = "";
     clearMarks();
@@ -665,6 +674,9 @@
   function enterSearchState() {
     if (!searchBar) return;
     searchBar.className = "jr-search-bar jr-search-bar--active";
+    var cc = getChatColCenter();
+    if (cc != null) searchBar.style.left = (cc - 150) + "px";
+    searchBar.style.top = "6px";
     updateNavButtons();
     // Focus input after class swap so it's visible
     setTimeout(function () {
@@ -695,29 +707,18 @@
     searchBar = document.createElement("div");
     searchBar.className = "jr-search-bar jr-search-bar--ready";
 
-    // --- Ready-state overlay (icon + label, centered) ---
-    var readyGroup = document.createElement("div");
-    readyGroup.className = "jr-search-ready-group";
-
-    var icon = document.createElement("span");
-    icon.className = "jr-search-icon";
-    icon.innerHTML = SEARCH_SVG;
-    readyGroup.appendChild(icon);
-
-    var label = document.createElement("span");
-    label.className = "jr-search-label";
-    label.textContent = "Search this page\u2026";
-    readyGroup.appendChild(label);
-
-    searchBar.appendChild(readyGroup);
-
-    // --- Search-state elements ---
+    // --- Search icon (visible in all states) ---
+    var activeIcon = document.createElement("span");
+    activeIcon.className = "jr-search-active-icon";
+    activeIcon.innerHTML = SEARCH_SVG;
+    searchBar.appendChild(activeIcon);
 
     // Input
     searchInput = document.createElement("input");
     searchInput.type = "text";
     searchInput.className = "jr-search-input";
     searchInput.placeholder = "Search this page\u2026";
+    searchInput.setAttribute("aria-label", "Search highlights");
     searchBar.appendChild(searchInput);
 
     // Match counter
@@ -730,6 +731,7 @@
     prevBtn = document.createElement("button");
     prevBtn.type = "button";
     prevBtn.className = "jr-search-prev";
+    prevBtn.setAttribute("aria-label", "Previous match");
     prevBtn.innerHTML = UP_SVG;
     prevBtn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -741,6 +743,7 @@
     nextBtn = document.createElement("button");
     nextBtn.type = "button";
     nextBtn.className = "jr-search-next";
+    nextBtn.setAttribute("aria-label", "Next match");
     nextBtn.innerHTML = DOWN_SVG;
     nextBtn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -799,26 +802,13 @@
     // Horizontally center over the chat column (right section).
     document.body.appendChild(searchBar);
 
-    var chatCol = document.querySelector('[class*="react-scroll-to-bottom"]')
-      || document.querySelector('main')
-      || null;
-    if (chatCol) {
-      var colRect = chatCol.getBoundingClientRect();
-      var colCenter = colRect.left + colRect.width / 2;
-      searchBar.style.left = colCenter + "px";
+    var cc = getChatColCenter();
+    if (cc != null) {
+      var barSize = searchBar.offsetWidth || 36;
+      searchBar.style.left = (cc - barSize / 2) + "px";
     }
 
-    var topBar = document.getElementById("page-header")
-      || document.querySelector("main .sticky.top-0")
-      || document.querySelector("header");
-    if (topBar) {
-      var barRect = topBar.getBoundingClientRect();
-      var barCenter = barRect.top + barRect.height / 2;
-      var searchH = searchBar.offsetHeight;
-      searchBar.style.top = (barCenter - searchH / 2) + "px";
-    } else {
-      searchBar.style.top = "8px";
-    }
+    searchBar.style.top = "8px";
   };
 
   /** Reset search state (called on SPA navigate). */

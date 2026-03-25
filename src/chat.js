@@ -5,15 +5,6 @@
   var S = JR.SELECTORS;
   var st = JR.state;
 
-  /**
-   * Read the auto-assigned color stashed on spans by createPopup.
-   * Color is final from cursor time — no re-detection at capture time.
-   */
-  function getAutoColor(spans) {
-    if (spans.length === 0) return null;
-    return spans[0]._jrAutoColor || null;
-  }
-
   // --- Chat injection ---
 
   JR.findSendButton = function () {
@@ -343,9 +334,6 @@
       while (cloned.firstChild) nodes.push(cloned.removeChild(cloned.firstChild));
       responseDiv.replaceChildren.apply(responseDiv, nodes);
 
-      // Auto-scroll to bottom during streaming
-      responseDiv.scrollTop = responseDiv.scrollHeight;
-
       // Check if the popup overflows and needs to flip direction mid-stream
       JR.checkStreamingOverflow();
 
@@ -401,11 +389,9 @@
           detachedHlId = crypto.randomUUID();
           var sourceArticle = detachedSpans[0].closest(S.aiTurn);
           var contentContainer = sourceArticle ? sourceArticle.parentElement : document.body;
-          var detachColor = getAutoColor(detachedSpans);
           for (var k = 0; k < detachedSpans.length; k++) {
             detachedSpans[k].setAttribute("data-jr-highlight-id", detachedHlId);
             detachedSpans[k].classList.add("jr-source-highlight-done");
-            if (detachColor) detachedSpans[k].classList.add("jr-highlight-color-" + detachColor);
           }
           var detachEntry = {
             quoteId: detachedHlId,
@@ -421,7 +407,6 @@
             items: [],
             activeItemIndex: 0,
           };
-          if (detachColor) detachEntry.color = detachColor;
           st.completedHighlights.set(detachedHlId, detachEntry);
         }
 
@@ -491,8 +476,8 @@
           sourceTurnIndex: memEntry ? (memEntry.spans && memEntry.spans[0] ? JR.getTurnNumber(memEntry.spans[0].closest(S.aiTurn)) : -1) : -1,
           questionIndex: qNum,
           responseIndex: rNum,
-          color: memEntry ? memEntry.color : null,
           active: true,
+          wholeResponse: memEntry ? !!memEntry.wholeResponse : false,
         });
 
         // Rebuild popup UI if it's open for this highlight
@@ -580,7 +565,6 @@
             spans[k].setAttribute("data-jr-highlight-id", hlId2);
             spans[k].classList.add("jr-source-highlight-done");
           }
-          var autoColor = getAutoColor(spans);
           var entryObj = {
             quoteId: hlId2,
             spans: spans.slice(),
@@ -589,7 +573,6 @@
             sentence: sentence,
             blockTypes: blockTypes,
             question: question || null,
-            color: autoColor || null,
             contentContainer: contentContainer2,
             parentId: parentId || null,
             parentItemId: parentItemId || null,
@@ -597,11 +580,6 @@
             items: [{ id: itemId2, question: question || null, responseHTML: responseHTML, questionIndex: qNum2, responseIndex: rNum2 }],
             activeItemIndex: 0,
           };
-          if (autoColor) {
-            for (var ac = 0; ac < spans.length; ac++) {
-              spans[ac].classList.add("jr-highlight-color-" + autoColor);
-            }
-          }
           st.completedHighlights.set(hlId2, entryObj);
         }
         st.activeHighlightId = hlId2;
@@ -610,25 +588,6 @@
         // Rebuild popup into completed view (editable question, version nav)
         if (popup && popup.isConnected) {
           JR.rebuildPopupAfterEdit(popup, hlId2);
-        }
-      }
-
-      var autoColor2 = null;
-      if (!detached && spans.length > 0) {
-        var e2 = st.completedHighlights.get(hlId2);
-        if (e2) autoColor2 = e2.color || null;
-      } else if (detached && detachedHlId) {
-        var de = st.completedHighlights.get(detachedHlId);
-        if (de && !de.color) {
-          autoColor2 = getAutoColor(spans);
-          if (autoColor2) {
-            de.color = autoColor2;
-            for (var dac = 0; dac < spans.length; dac++) {
-              spans[dac].classList.add("jr-highlight-color-" + autoColor2);
-            }
-          }
-        } else if (de) {
-          autoColor2 = de.color;
         }
       }
 
@@ -654,7 +613,6 @@
           questionIndex: qNum2,
           responseIndex: rNum2,
           sourceTurnIndex: sourceTurnIdx,
-          color: autoColor2,
         });
       } else {
         saveHighlight({
@@ -672,7 +630,6 @@
           sourceTurnIndex: sourceTurnIdx,
           questionIndex: qNum2,
           responseIndex: rNum2,
-          color: autoColor2,
         });
       }
 
@@ -773,53 +730,7 @@
 
           var timeoutDiv = document.createElement("div");
           timeoutDiv.className = "jr-popup-loading";
-
-          var msg = document.createElement("div");
-          msg.textContent = "Couldn\u2019t get a response";
-          timeoutDiv.appendChild(msg);
-
-          var retryBtn = document.createElement("button");
-          retryBtn.type = "button";
-          retryBtn.className = "jr-retry-btn";
-          retryBtn.title = "Try again";
-          retryBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M244,56v48a12,12,0,0,1-12,12H184a12,12,0,1,1,0-24H201.1l-19-17.38c-.13-.12-.26-.24-.38-.37A76,76,0,1,0,127,204h1a75.53,75.53,0,0,0,52.15-20.72,12,12,0,0,1,16.49,17.45A99.45,99.45,0,0,1,128,228h-1.37A100,100,0,1,1,198.51,57.06L220,76.72V56a12,12,0,0,1,24,0Z"/></svg>';
-          retryBtn.addEventListener("click", function (ev) {
-            ev.stopPropagation();
-            timeoutDiv.remove();
-            // Rebuild message
-            var retryMessage;
-            if (sentence) {
-              retryMessage = 'Regarding this part of your response:\n"' + sentence + '"\n\nSpecifically: "' + text + '"\n\n' + question;
-            } else {
-              retryMessage = 'Regarding this part of your response:\n"' + text + '"\n\n' + question;
-            }
-            if (st.responseMode === "brief") {
-              retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
-            } else {
-              retryMessage += "\n\n(Ignore any previous instructions about brevity \u2014 respond at your normal length.)";
-            }
-
-            var retryLoading = JR.createLoadingDiv();
-            targetPopup.appendChild(retryLoading);
-
-            var retryWaitOpts = {
-              popup: targetPopup, turnsBefore: 0, text: text, sentence: sentence,
-              blockTypes: blockTypes, unlockScroll: null, parentId: parentId,
-              question: question, editOpts: editOpts
-            };
-
-            JR.enqueueMessage({
-              message: retryMessage,
-              waitOpts: retryWaitOpts,
-              beforeSend: function (w) {
-                w.turnsBefore = document.querySelectorAll(S.aiTurn).length;
-                var scrollAnchor = document.querySelector(S.aiTurn) || document.body;
-                var chatScrollParent = JR.getScrollParent(scrollAnchor);
-                w.unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
-              },
-            });
-          });
-          timeoutDiv.appendChild(retryBtn);
+          timeoutDiv.textContent = "Couldn\u2019t get a response";
           targetPopup.appendChild(timeoutDiv);
         }
 

@@ -77,17 +77,11 @@
         if (hasInsideDone && hasOutsideDone) break;
       }
       var filteredWrapping = hasInsideDone && hasOutsideDone;
-      var wrappedDoneColors = new Set();
       if (filteredWrapping) {
         var filtered = [];
         for (var fi = 0; fi < textNodes.length; fi++) {
           var doneAncestor = textNodes[fi].parentElement && textNodes[fi].parentElement.closest(".jr-source-highlight-done");
-          if (doneAncestor) {
-            // Capture the color of the done highlight being wrapped around
-            var doneHlId = doneAncestor.getAttribute("data-jr-highlight-id");
-            var doneEntry = doneHlId && st.completedHighlights.get(doneHlId);
-            wrappedDoneColors.add((doneEntry && doneEntry.color) || "blue");
-          } else {
+          if (!doneAncestor) {
             filtered.push(textNodes[fi]);
           }
         }
@@ -138,11 +132,6 @@
         }
         wrappers.unshift(spanEl);
       }
-      // Stash wrapping info so pickNonConflictingColor can use it
-      if (filteredWrapping && wrappers.length > 0) {
-        wrappers[0]._jrWrapping = true;
-        wrappers[0]._jrWrappedColors = wrappedDoneColors;
-      }
     } catch (e) {
       console.warn("[Popup] highlightRange failed:", e);
       for (var j = 0; j < wrappers.length; j++) {
@@ -158,50 +147,12 @@
   };
 
   /**
-   * If highlight spans overlap an existing completed highlight (either nested
-   * inside or wrapping around), return a color that won't conflict.
-   * Returns null when no conflict is detected (caller uses default blue).
-   */
-  JR.pickNonConflictingColor = function (spans) {
-    if (spans.length === 0) return null;
-    var colors = JR.HIGHLIGHT_COLORS;
-    var conflictColors = new Set();
-
-    // Case 1: new highlight is INSIDE an existing one — walk up from each span
-    for (var i = 0; i < spans.length; i++) {
-      var ancestor = spans[i].parentElement;
-      while (ancestor) {
-        if (ancestor.classList && ancestor.classList.contains("jr-source-highlight-done")) {
-          var hlId = ancestor.getAttribute("data-jr-highlight-id");
-          var entry = hlId && st.completedHighlights.get(hlId);
-          conflictColors.add((entry && entry.color) || "blue");
-          break;
-        }
-        ancestor = ancestor.parentElement;
-      }
-    }
-
-    // Case 2: new highlight WRAPS around existing ones — use colors captured
-    // directly during highlightRange's filter phase (most reliable source)
-    if (spans[0]._jrWrappedColors) {
-      spans[0]._jrWrappedColors.forEach(function (c) {
-        conflictColors.add(c);
-      });
-    }
-
-    if (conflictColors.size === 0) return null;
-    for (var c = 0; c < colors.length; c++) {
-      if (!conflictColors.has(colors[c])) return colors[c];
-    }
-    return colors[1];
-  };
-
-  /**
    * Remove all source highlight spans and restore original DOM.
    */
   JR.removeSourceHighlight = function () {
     for (var i = 0; i < st.activeSourceHighlights.length; i++) {
       var span = st.activeSourceHighlights[i];
+      if (span._jrReplyAnchor) continue; // don't unwrap reply-to-all buttons
       var parent = span.parentNode;
       if (!parent) continue;
       while (span.firstChild) {
@@ -297,9 +248,6 @@
     for (var k = 0; k < wrappers.length; k++) {
       wrappers[k].setAttribute("data-jr-highlight-id", hlKey);
       wrappers[k].classList.add("jr-source-highlight-done");
-      if (hl.color) {
-        wrappers[k].classList.add("jr-highlight-color-" + hl.color);
-      }
     }
     var entry = {
       quoteId: hlKey,

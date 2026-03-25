@@ -23,12 +23,10 @@
 
     SENTENCE_TERMINATORS: [".", "?", "!", "\u3002", "\uFF1F", "\uFF01"],
 
-    HIGHLIGHT_COLORS: ["blue", "yellow", "green", "pink", "purple"],
-
     // --- Shared mutable state ---
     state: {
       activePopup: null,
-      responseMode: "regular",          // "regular" or "brief"
+      responseMode: "medium",           // "medium" or "concise"
       cancelResponseWatch: null,
       responseWatchActive: false,       // true while waitForResponse is polling (including detached)
       activeSourceHighlights: [],       // wrapper <span> elements in the AI response

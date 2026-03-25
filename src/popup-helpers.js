@@ -548,8 +548,8 @@
 
     popup.addEventListener("mousemove", function (e) {
       if (popup._jrResizing) return;
-      // No resize cursor while streaming or during delete confirmation
-      if ((st.cancelResponseWatch && popup.querySelector(".jr-popup-response")) || st.confirmingDelete) {
+      // No resize cursor during delete confirmation
+      if (st.confirmingDelete) {
         popup.style.cursor = "";
         return;
       }
@@ -563,8 +563,8 @@
     popup.addEventListener("mousedown", function (e) {
       var edge = getEdge(e);
       if (!edge) return;
-      // Block resize while streaming or during delete confirmation
-      if ((st.cancelResponseWatch && popup.querySelector(".jr-popup-response")) || st.confirmingDelete) return;
+      // Block resize during delete confirmation
+      if (st.confirmingDelete) return;
       e.preventDefault();
 
       popup._jrResizing = true;
@@ -681,9 +681,13 @@
         if (!st.activeHighlightId || !st.completedHighlights.has(st.activeHighlightId)) return;
         var hlId = st.activeHighlightId;
         var range = selection.getRangeAt(0).cloneRange();
-        selection.removeAllRanges();
-        JR.pushPopupState();
-        JR.createPopup({ text: selectedText, parentId: hlId, range: range });
+        // Show trigger button instead of opening popup immediately
+        if (JR.removeTriggerBtn) JR.removeTriggerBtn();
+        var selRect = range.getBoundingClientRect();
+        JR.showTriggerBtn && JR.showTriggerBtn(
+          { text: selectedText, range: range, rect: selRect },
+          { parentId: hlId }
+        );
       }, 10);
     });
 
@@ -804,6 +808,7 @@
     var upBtn = document.createElement("button");
     upBtn.type = "button";
     upBtn.className = "jr-nav-up";
+    upBtn.setAttribute("aria-label", "Previous highlight");
     upBtn.innerHTML = NAV_UP_SVG;
 
     var indicator = document.createElement("span");
@@ -812,6 +817,7 @@
     var downBtn = document.createElement("button");
     downBtn.type = "button";
     downBtn.className = "jr-nav-down";
+    downBtn.setAttribute("aria-label", "Next highlight");
     downBtn.innerHTML = NAV_DOWN_SVG;
 
     widget.appendChild(upBtn);
@@ -1015,10 +1021,20 @@
     }
   };
 
+  function detachPopupState() {
+    if (st.cancelResponseWatch) st.cancelResponseWatch(true);
+    st.activeSourceHighlights = [];
+    if (st.resizeHandler) {
+      window.removeEventListener("resize", st.resizeHandler);
+      st.resizeHandler = null;
+    }
+  }
+
   JR.removePopup = function () {
     var isCompleted = false;
     var isTemp = false;
-    if (st.activeSourceHighlights.length > 0) {
+    var isReplyAnchor = st.activeSourceHighlights.length > 0 && !!st.activeSourceHighlights[0]._jrReplyAnchor;
+    if (!isReplyAnchor && st.activeSourceHighlights.length > 0) {
       var hlId = st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id");
       if (hlId && st.completedHighlights.has(hlId)) {
         var hlEntry = st.completedHighlights.get(hlId);
@@ -1031,22 +1047,17 @@
       }
     }
 
-    if (isCompleted) {
-      if (st.cancelResponseWatch) {
-        st.cancelResponseWatch(true); // detach — keep polling for edit responses
+    if (isReplyAnchor) {
+      detachPopupState();
+      // Clean up temp entry if the question was never sent
+      if (st.activeHighlightId) {
+        var tempEntry = st.completedHighlights.get(st.activeHighlightId);
+        if (tempEntry && tempEntry._jrTemp) {
+          st.completedHighlights.delete(st.activeHighlightId);
+        }
       }
-      st.activeSourceHighlights = [];
-      if (st.resizeHandler) {
-        window.removeEventListener("resize", st.resizeHandler);
-        st.resizeHandler = null;
-      }
-    } else if (st.cancelResponseWatch) {
-      st.cancelResponseWatch(true);
-      st.activeSourceHighlights = [];
-      if (st.resizeHandler) {
-        window.removeEventListener("resize", st.resizeHandler);
-        st.resizeHandler = null;
-      }
+    } else if (isCompleted || st.cancelResponseWatch) {
+      detachPopupState();
     } else {
       JR.removeSourceHighlight();
     }
@@ -1060,8 +1071,12 @@
         st.activePopup._jrScrollCleanup();
         st.activePopup._jrScrollCleanup = null;
       }
+      var popupParent = st.activePopup.parentElement;
       st.activePopup.remove();
       st.activePopup = null;
+      if (popupParent && st.popupStack.length === 0) {
+        popupParent.style.zIndex = "";
+      }
     }
     st.activeHighlightId = null;
 

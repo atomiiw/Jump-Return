@@ -4,23 +4,130 @@
 
   var st = JR.state;
   var mouseIsDown = false;
+  var triggerBtn = null; // floating "open popup" button after highlight
+  var triggerData = null; // saved selection data for the trigger
 
   document.addEventListener("mousedown", function () { mouseIsDown = true; }, true);
   document.addEventListener("mouseup", function () { mouseIsDown = false; }, true);
+
+  // --- Trigger button helpers ---
+
+  var triggerScrollHandler = null;
+  var triggerResizeHandler = null;
+
+  function removeTriggerBtn() {
+    if (triggerScrollHandler) {
+      document.removeEventListener("scroll", triggerScrollHandler, true);
+      triggerScrollHandler = null;
+    }
+    if (triggerResizeHandler) {
+      window.removeEventListener("resize", triggerResizeHandler);
+      triggerResizeHandler = null;
+    }
+    if (triggerBtn) {
+      triggerBtn.remove();
+      triggerBtn = null;
+      triggerData = null;
+    }
+  }
+  JR.removeTriggerBtn = removeTriggerBtn;
+
+  /**
+   * Show trigger button for a selection.
+   * @param {object} result - { text, sentence, blockTypes, rect, range }
+   * @param {object} [opts] - { parentId } for chained (inside popup response)
+   */
+  function showTriggerBtn(result, opts) {
+    removeTriggerBtn();
+    triggerData = result;
+    var chainParentId = opts && opts.parentId ? opts.parentId : null;
+
+    triggerBtn = document.createElement("button");
+    triggerBtn.type = "button";
+    triggerBtn.className = "jr-highlight-trigger-btn";
+    triggerBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,44H40A20,20,0,0,0,20,64V224a19.82,19.82,0,0,0,11.56,18.12A20.14,20.14,0,0,0,40,244a19.87,19.87,0,0,0,12.81-4.73l.09-.08L84.94,212H216a20,20,0,0,0,20-20V64A20,20,0,0,0,216,44Zm-4,144H80a12,12,0,0,0-7.69,2.8L44,215.23V68H212Z"/></svg>';
+    triggerBtn.title = "Follow up";
+    triggerBtn.setAttribute("aria-label", "Follow up on selection");
+    triggerBtn.style.position = "fixed";
+
+    function positionBtn() {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        removeTriggerBtn();
+        return;
+      }
+      var range = sel.getRangeAt(0);
+      var r = range.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) {
+        removeTriggerBtn();
+        return;
+      }
+      var btnSize = triggerBtn.offsetWidth || 32;
+      var rects = range.getClientRects();
+      var maxRight = r.right;
+      for (var ri = 0; ri < rects.length; ri++) {
+        if (rects[ri].right > maxRight) maxRight = rects[ri].right;
+      }
+      triggerBtn.style.left = Math.min(maxRight + 6, window.innerWidth - btnSize - 4) + "px";
+      triggerBtn.style.top = (r.top + r.height / 2 - (triggerBtn.offsetHeight || 32) / 2) + "px";
+    }
+
+    triggerBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+      var data = triggerData;
+      removeTriggerBtn();
+      if (!data) return;
+      // Clear native selection
+      var sel = window.getSelection();
+      if (sel) sel.removeAllRanges();
+      if (chainParentId) {
+        // Chained popup inside a popup response
+        JR.pushPopupState();
+        JR.createPopup({ text: data.text, parentId: chainParentId, range: data.range });
+      } else {
+        // Page-level popup
+        JR.removeAllPopups();
+        JR.createPopup({ text: data.text, sentence: data.sentence, blockTypes: data.blockTypes, rect: data.rect, range: data.range });
+      }
+      // Auto-focus the question input
+      if (st.activePopup) {
+        var input = st.activePopup.querySelector(".jr-popup-question-text[contenteditable]");
+        if (input) {
+          requestAnimationFrame(function () { input.focus(); });
+        }
+      }
+    });
+
+    triggerBtn.addEventListener("mousedown", function (e) {
+      e.stopPropagation();
+    });
+
+    document.body.appendChild(triggerBtn);
+    positionBtn();
+
+    // Reposition on scroll/resize instead of rAF polling
+    triggerScrollHandler = function () { if (triggerBtn) positionBtn(); };
+    triggerResizeHandler = triggerScrollHandler;
+    document.addEventListener("scroll", triggerScrollHandler, true);
+    window.addEventListener("resize", triggerResizeHandler);
+  }
+  JR.showTriggerBtn = showTriggerBtn;
 
   // --- Selection listener ---
 
   function handleSelectionChange() {
     if (st.confirmingDelete) return;
-    JR.removeAllPopups();
+    removeTriggerBtn();
     var result = JR.getSelectedTextInAIResponse();
     if (!result) return;
-    JR.createPopup({ text: result.text, sentence: result.sentence, blockTypes: result.blockTypes, rect: result.rect, range: result.range });
+    showTriggerBtn(result);
   }
 
   document.addEventListener("mouseup", function (e) {
     if (e.target.closest(".jr-popup-disable-btn")) return;
     if (e.target.closest(".jr-search-bar")) return;
+    if (e.target.closest(".jr-highlight-trigger-btn")) return;
     if (st.navWidget && st.navWidget.contains(e.target)) return;
     if (st.activePopup && st.activePopup.contains(e.target)) return;
     if (st.activePopup) {
@@ -38,9 +145,14 @@
   // --- Dismissal ---
 
   document.addEventListener("mousedown", function (e) {
-    // Ignore clicks on the "Ask ChatGPT" dismiss button or search bar
+    // Ignore clicks on the "Ask ChatGPT" dismiss button, search bar, or trigger button
     if (e.target.closest(".jr-popup-disable-btn")) return;
     if (e.target.closest(".jr-search-bar")) return;
+    if (e.target.closest(".jr-highlight-trigger-btn")) return;
+    // Dismiss trigger button on click outside
+    if (triggerBtn && !triggerBtn.contains(e.target)) {
+      removeTriggerBtn();
+    }
     if (!st.activePopup && st.popupStack.length === 0) return;
     if (st.confirmingDelete) {
       // Click outside popup cancels delete confirmation
@@ -63,6 +175,7 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") {
+      if (triggerBtn) { removeTriggerBtn(); return; }
       if (!st.activePopup) return;
       if (st.confirmingDelete) return;
       JR.removePopup();
@@ -117,8 +230,11 @@
   /**
    * Create underline elements for a highlight entry.
    * Works for page-level and popup-level highlights.
+   * @param {object} entry
+   * @param {object} [opts] - { allowScrollParent: true } to place underlines inside scroll containers
    */
-  JR.createUnderlines = function (entry) {
+  JR.createUnderlines = function (entry, opts) {
+    opts = opts || {};
     var elems = [];
     if (!entry || !entry.spans || entry.spans.length === 0) return elems;
 
@@ -170,20 +286,17 @@
     }
 
     // Find the nearest positioned ancestor for underline placement.
-    // Skip scroll containers (overflow-y: auto/scroll) — absolutely positioned
-    // children extend their scrollable overflow area, causing blank space.
-    // Also skip .jr-popup-response unconditionally — its overflow is toggled
-    // between auto and hidden by attachScrollTracking, so checking computed
-    // overflow at call time is unreliable and leads to stale underlines
-    // inside the response div that create a white gap when overflow resets.
+    // For active (persistent) underlines: skip scroll containers and
+    // .jr-popup-response to avoid extending scrollable overflow.
+    // For hover (temporary) underlines: allow .jr-popup-response so
+    // underlines scroll with the content, matching page-level behavior.
     var posParent = null;
     var el = entry.spans[0].parentElement;
     while (el) {
-      if (el.classList.contains("jr-popup-response")) { el = el.parentElement; continue; }
+      if (!opts.allowScrollParent && el.classList.contains("jr-popup-response")) { el = el.parentElement; continue; }
       var cs = getComputedStyle(el);
       if (cs.position === "relative" || cs.position === "absolute" || cs.position === "fixed") {
-        var ov = cs.overflowY;
-        if (ov !== "auto" && ov !== "scroll") {
+        if (opts.allowScrollParent || (cs.overflowY !== "auto" && cs.overflowY !== "scroll")) {
           posParent = el;
           break;
         }
@@ -242,7 +355,7 @@
     if (hoveredHlId === hlId) return;
     removeElems(hoverUnderlines);
     hoveredHlId = hlId;
-    hoverUnderlines = JR.createUnderlines(st.completedHighlights.get(hlId));
+    hoverUnderlines = JR.createUnderlines(st.completedHighlights.get(hlId), { allowScrollParent: true });
   });
 
   document.addEventListener("mouseout", function (e) {
@@ -260,12 +373,6 @@
   // On scroll, check if mouse is still over the hovered highlight — remove underline if not
   document.addEventListener("scroll", function () {
     if (!hoveredHlId) return;
-    var entry = st.completedHighlights.get(hoveredHlId);
-    if (!entry || !entry.spans || entry.spans.length === 0) {
-      removeElems(hoverUnderlines);
-      hoveredHlId = null;
-      return;
-    }
     var elUnder = document.elementFromPoint(lastMouseX, lastMouseY);
     if (!elUnder || !elUnder.closest || !elUnder.closest(".jr-source-highlight-done[data-jr-highlight-id=\"" + hoveredHlId + "\"]")) {
       removeElems(hoverUnderlines);
@@ -279,7 +386,7 @@
     if (!Array.isArray(hlIds)) hlIds = [hlIds];
     for (var i = 0; i < hlIds.length; i++) {
       var entry = st.completedHighlights.get(hlIds[i]);
-      if (entry) {
+      if (entry && !(entry.spans && entry.spans[0] && entry.spans[0]._jrReplyAnchor)) {
         var elems = JR.createUnderlines(entry);
         for (var j = 0; j < elems.length; j++) activeUnderlines.push(elems[j]);
       }
@@ -343,7 +450,18 @@
    */
   function scrollResponseToChild(childHlId) {
     var childEntry = st.completedHighlights.get(childHlId);
-    if (!childEntry || !childEntry.spans || childEntry.spans.length === 0) return;
+    if (!childEntry) return;
+
+    // Reply-to-all: scroll parent response to bottom to reveal the Reply button
+    if (childEntry.wholeResponse) {
+      if (st.activePopup) {
+        var respDiv = st.activePopup.querySelector(".jr-popup-response");
+        if (respDiv) respDiv.scrollTop = respDiv.scrollHeight;
+      }
+      return;
+    }
+
+    if (!childEntry.spans || childEntry.spans.length === 0) return;
     var responseDiv = childEntry.spans[0].closest(".jr-popup-response");
     if (!responseDiv) return;
     var spanRect = childEntry.spans[0].getBoundingClientRect();

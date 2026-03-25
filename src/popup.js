@@ -231,7 +231,29 @@
     };
   }
 
-  function buildInputRow(container, text, sentence, blockTypes, wrappers, parentId) {
+  /** Populate a mode dropdown with Medium/Concise items. */
+  function populateModeDropdown(dropdown, onSelect) {
+    dropdown.innerHTML = "";
+    var modes = [
+      { key: "medium", label: "Detailed" },
+      { key: "concise", label: "Concise" }
+    ];
+    for (var mi = 0; mi < modes.length; mi++) {
+      (function (m) {
+        var item = document.createElement("div");
+        item.className = "jr-send-mode-item";
+        if (m.key === st.responseMode) item.classList.add("jr-send-mode-item--active");
+        item.textContent = m.label;
+        item.addEventListener("click", function (e) {
+          e.stopPropagation();
+          onSelect(m.key);
+        });
+        dropdown.appendChild(item);
+      })(modes[mi]);
+    }
+  }
+
+  function buildInputRow(container, text, sentence, blockTypes, wrappers, parentId, wholeResponse, wholeResponseFull) {
     var popup = container.closest(".jr-popup");
     var questionDiv = document.createElement("div");
     questionDiv.className = "jr-popup-question";
@@ -263,18 +285,22 @@
     var sendBtn = document.createElement("button");
     sendBtn.type = "button";
     sendBtn.className = "jr-popup-edit-send";
+    sendBtn.setAttribute("aria-label", "Send question");
     sendBtn.innerHTML = SEND_SVG;
     sendBtn.disabled = true;
     sendWrapper.appendChild(sendBtn);
 
-    var switchBtn = document.createElement("div");
-    switchBtn.className = "jr-send-switch-btn jr-disabled";
-    function updateSwitchLabel() {
-      var other = st.responseMode === "brief" ? "Detailed" : "Concise";
-      switchBtn.innerHTML = '<span class="jr-switch-inner">' + SWITCH_SVG + other + '</span>';
+    var dropdown = document.createElement("div");
+    dropdown.className = "jr-send-mode-dropdown jr-disabled";
+    function rebuildDropdown() {
+      populateModeDropdown(dropdown, function (key) {
+        var current = questionText.textContent.trim();
+        if (!current) return;
+        doSend(key);
+      });
     }
-    updateSwitchLabel();
-    sendWrapper.appendChild(switchBtn);
+    rebuildDropdown();
+    sendWrapper.appendChild(dropdown);
     questionDiv.appendChild(sendWrapper);
     container.appendChild(questionDiv);
 
@@ -285,7 +311,9 @@
       st.responseMode = mode;
 
       var message;
-      if (sentence) {
+      if (wholeResponse) {
+        message = 'Regarding your entire response below:\n\n"' + wholeResponseFull + '"\n\n' + question;
+      } else if (sentence) {
         message =
           'Regarding this part of your response:\n"' +
           sentence +
@@ -301,10 +329,10 @@
           question;
       }
 
-      if (mode === "brief") {
+      if (mode === "concise") {
         message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
       } else {
-        message += "\n\n(Ignore any previous instructions about brevity \u2014 respond at your normal length.)";
+        message += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
       }
 
       questionDiv.remove();
@@ -329,7 +357,6 @@
       // Register highlight immediately so it persists even if popup is dismissed
       var sendHlId = crypto.randomUUID();
       var sendItemId = crypto.randomUUID();
-      var sendAutoColor = (wrappers.length > 0 && wrappers[0]._jrAutoColor) || null;
       var sourceArticle = wrappers.length > 0 ? wrappers[0].closest(S.aiTurn) : null;
       var sourceTurnIdx = sourceArticle ? JR.getTurnNumber(sourceArticle) : -1;
       var sendContentContainer;
@@ -338,9 +365,9 @@
       } else if (parentId && wrappers.length > 0) {
         // Chained highlight: spans are inside a parent popup, not an AI turn
         var parentPopupEl = wrappers[0].closest(".jr-popup");
-        sendContentContainer = (parentPopupEl && parentPopupEl.parentElement) || contentContainer || document.body;
+        sendContentContainer = (parentPopupEl && parentPopupEl.parentElement) || popup.parentElement || document.body;
       } else {
-        sendContentContainer = contentContainer || document.body;
+        sendContentContainer = popup.parentElement || document.body;
       }
 
       // Resolve parent's active item id so children are version-specific
@@ -366,13 +393,13 @@
         sentence: sentence,
         blockTypes: blockTypes,
         question: question,
-        color: sendAutoColor,
         contentContainer: sendContentContainer,
         parentId: parentId || null,
         parentItemId: sendParentItemId,
         responseIndex: -1,
         items: [{ id: sendItemId, question: question, responseHTML: "__PENDING__", questionIndex: -1, responseIndex: -1 }],
         activeItemIndex: 0,
+        wholeResponse: !!wholeResponse,
       };
       st.completedHighlights.set(sendHlId, pendingEntry);
       st.activeHighlightId = sendHlId;
@@ -392,7 +419,7 @@
         sourceTurnIndex: sourceTurnIdx,
         questionIndex: -1,
         responseIndex: -1,
-        color: sendAutoColor,
+        wholeResponse: !!wholeResponse,
       });
 
       JR.updateNavWidget();
@@ -425,16 +452,7 @@
       doSend(st.responseMode);
     });
 
-    // Click switch button → switch mode and send
-    switchBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      var current = questionText.textContent.trim();
-      if (!current) return;
-      var newMode = st.responseMode === "brief" ? "regular" : "brief";
-      doSend(newMode);
-    });
-
-    // Track input to enable/disable send + switch
+    // Track input to enable/disable send + dropdown
     questionText.addEventListener("input", function () {
       var current = questionText.textContent.trim();
       if (!current && questionText.innerHTML !== "") {
@@ -443,16 +461,23 @@
       var empty = !current;
       sendBtn.disabled = empty;
       if (empty) {
-        switchBtn.classList.add("jr-disabled");
+        dropdown.classList.add("jr-disabled");
       } else {
-        switchBtn.classList.remove("jr-disabled");
+        dropdown.classList.remove("jr-disabled");
       }
     });
 
-    // Block Enter in question input (send via button only)
+    // Enter sends, Cmd/Ctrl+Enter inserts newline
     questionText.addEventListener("keydown", function (e) {
       if (e.key === "Enter") {
-        e.preventDefault();
+        if (e.metaKey || e.ctrlKey) {
+          document.execCommand("insertLineBreak");
+          e.preventDefault();
+        } else {
+          e.preventDefault();
+          var current = questionText.textContent.trim();
+          if (current) doSend(st.responseMode);
+        }
       }
     });
 
@@ -468,82 +493,7 @@
 
   var TRASH_SVG = '<svg class="jr-icon-reg" viewBox="0 0 256 256" fill="currentColor"><path d="M216,48H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM192,208H64V64H192ZM80,24a8,8,0,0,1,8-8h80a8,8,0,0,1,0,16H88A8,8,0,0,1,80,24Z"/></svg><svg class="jr-icon-bold" viewBox="0 0 256 256" fill="currentColor"><path d="M216,48H40a12,12,0,0,0,0,24h4V208a20,20,0,0,0,20,20H192a20,20,0,0,0,20-20V72h4a12,12,0,0,0,0-24ZM188,204H68V72H188ZM76,20A12,12,0,0,1,88,8h80a12,12,0,0,1,0,24H88A12,12,0,0,1,76,20Z"/></svg>';
 
-  /**
-   * Build the toolbar DOM for a given highlight. Re-creates each time
-   * because the hlId / entry may change on each hover.
-   */
-  function applyColorToHighlight(color, entry, hlId) {
-    var colors = JR.HIGHLIGHT_COLORS;
-    var spans = entry.spans;
-    for (var s = 0; s < spans.length; s++) {
-      for (var c = 0; c < colors.length; c++) {
-        spans[s].classList.remove("jr-highlight-color-" + colors[c]);
-      }
-      spans[s].classList.add("jr-highlight-color-" + color);
-    }
-    if (st.activePopup && st.activeHighlightId === hlId) {
-      var marks = st.activePopup.querySelectorAll(".jr-popup-mark");
-      for (var m = 0; m < marks.length; m++) {
-        for (var c2 = 0; c2 < colors.length; c2++) {
-          marks[m].classList.remove("jr-highlight-color-" + colors[c2]);
-        }
-        marks[m].classList.add("jr-highlight-color-" + color);
-      }
-    }
-  }
-
-  function buildToolbarEl(hlId, entry, opts) {
-    opts = opts || {};
-    var toolbar = document.createElement("div");
-    toolbar.className = "jr-popup-toolbar";
-
-    var colors = JR.HIGHLIGHT_COLORS;
-
-    for (var i = 0; i < colors.length; i++) {
-      (function (color) {
-        var swatch = document.createElement("div");
-        swatch.className = "jr-toolbar-swatch jr-toolbar-swatch--" + color;
-        if (color === (entry.color || "blue")) swatch.classList.add("jr-toolbar-swatch--active");
-        swatch.addEventListener("click", function (e) {
-          e.stopPropagation();
-          entry.color = color;
-          // Sync to _jrAutoColor so captureResponse picks up color for new highlights
-          if (entry.spans && entry.spans.length > 0) {
-            entry.spans[0]._jrAutoColor = color;
-          }
-          var swatches = toolbar.querySelectorAll(".jr-toolbar-swatch");
-          for (var sw = 0; sw < swatches.length; sw++) {
-            swatches[sw].classList.remove("jr-toolbar-swatch--active");
-          }
-          swatch.classList.add("jr-toolbar-swatch--active");
-          applyColorToHighlight(color, entry, hlId);
-          if (!entry._jrTemp) updateHighlightColor(hlId, color);
-        });
-        toolbar.appendChild(swatch);
-      })(colors[i]);
-    }
-
-    if (!opts.hideTrash) {
-      var trashBtn = document.createElement("button");
-      trashBtn.type = "button";
-      trashBtn.className = "jr-toolbar-delete";
-      trashBtn.innerHTML = TRASH_SVG;
-      trashBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        showDeleteConfirmation(hlId, entry);
-      });
-      toolbar.appendChild(trashBtn);
-    }
-
-    // Stop mousedown from propagating so click-outside doesn't dismiss popup
-    toolbar.addEventListener("mousedown", function (e) {
-      e.stopPropagation();
-    });
-
-    return toolbar;
-  }
-
-  // Toolbar is now inline in popups — these are no-ops kept for callers.
+  // Toolbar no-ops kept for callers.
   JR.showToolbar = function () {};
   JR.hideToolbar = function () {};
   JR.positionToolbar = function () {};
@@ -555,6 +505,7 @@
 
     st.confirmingDelete = true;
     JR.updateNavDisabled();
+    if (JR.removeTriggerBtn) JR.removeTriggerBtn();
 
     // Build confirm card inside the popup (after counting descendants)
     countDescendants(hlId).then(function (count) {
@@ -581,6 +532,7 @@
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
       cancelBtn.className = "jr-popup-confirm-icon-btn";
+      cancelBtn.setAttribute("aria-label", "Cancel delete");
       cancelBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z"/></svg>';
       cancelBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
@@ -604,6 +556,7 @@
       var deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.className = "jr-popup-confirm-icon-btn jr-popup-confirm-icon-btn--danger";
+      deleteBtn.setAttribute("aria-label", "Confirm delete");
       deleteBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.49,80.49l-128,128a12,12,0,0,1-17,0l-56-56a12,12,0,1,1,17-17L96,183,215.51,63.51a12,12,0,0,1,17,17Z"/></svg>';
       deleteBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
@@ -710,11 +663,13 @@
     var prevBtn = document.createElement("button");
     prevBtn.type = "button";
     prevBtn.className = "jr-popup-version-prev";
+    prevBtn.setAttribute("aria-label", "Previous version");
     prevBtn.innerHTML = '<svg class="jr-icon-reg" viewBox="0 0 256 256" fill="currentColor"><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"/></svg><svg class="jr-icon-bold" viewBox="0 0 256 256" fill="currentColor"><path d="M168.49,199.51a12,12,0,0,1-17,17l-80-80a12,12,0,0,1,0-17l80-80a12,12,0,0,1,17,17L97,128Z"/></svg>';
 
     var nextBtn = document.createElement("button");
     nextBtn.type = "button";
     nextBtn.className = "jr-popup-version-next";
+    nextBtn.setAttribute("aria-label", "Next version");
     nextBtn.innerHTML = '<svg class="jr-icon-reg" viewBox="0 0 256 256" fill="currentColor"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></svg><svg class="jr-icon-bold" viewBox="0 0 256 256" fill="currentColor"><path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z"/></svg>';
 
     nav.appendChild(prevBtn);
@@ -808,6 +763,7 @@
       if (chEntry._jrTemp) return; // skip in-progress (unsent) highlights
       if (chEntry.parentId !== parentQuoteId) return;
       if (activeParentItemId && chEntry.parentItemId !== activeParentItemId) return;
+      if (chEntry.wholeResponse) return; // reply-to-all: opened via reply button, not text-matched
       JR.restoreHighlightInElement(responseDiv, {
         quoteId: chQuoteId, text: chEntry.text, responseHTML: chEntry.responseHTML,
         sentence: chEntry.sentence, blockTypes: chEntry.blockTypes, question: chEntry.question,
@@ -821,6 +777,29 @@
       for (var ci = 0; ci < children.length; ci++) {
         var child = children[ci];
         var childKey = child.quoteId || child.id;
+        if (child.wholeResponse) {
+          // Reply-to-all: add to memory without text-matching, opened via reply button
+          if (!st.completedHighlights.has(childKey)) {
+            st.completedHighlights.set(childKey, {
+              quoteId: childKey,
+              spans: [],
+              responseHTML: child.responseHTML,
+              text: child.text,
+              sentence: child.sentence,
+              blockTypes: child.blockTypes,
+              question: child.question || null,
+              color: child.color || null,
+              contentContainer: contentContainer,
+              parentId: child.parentId || null,
+              parentItemId: child.parentItemId || null,
+              responseIndex: child.responseIndex || -1,
+              items: [{ id: child.id, question: child.question || null, responseHTML: child.responseHTML, questionIndex: child.questionIndex || -1, responseIndex: child.responseIndex || -1 }],
+              activeItemIndex: 0,
+              wholeResponse: true,
+            });
+          }
+          continue;
+        }
         if (responseDiv.querySelector('[data-jr-highlight-id="' + childKey + '"]')) continue;
         JR.restoreHighlightInElement(responseDiv, child, contentContainer);
       }
@@ -854,17 +833,19 @@
     var text = entry.text;
     var sentence = entry.sentence;
     var message;
-    if (sentence) {
+    if (entry.wholeResponse) {
+      message = 'Regarding your entire response above:\n\n' + newQuestion;
+    } else if (sentence) {
       message = 'Regarding this part of your response:\n"' + sentence + '"\n\nSpecifically: "' + text + '"\n\n' + newQuestion;
     } else {
       message = 'Regarding this part of your response:\n"' + text + '"\n\n' + newQuestion;
     }
 
-    var editMode = mode || "regular";
-    if (editMode === "brief") {
+    var editMode = mode || "medium";
+    if (editMode === "concise") {
       message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
     } else {
-      message += "\n\n(Ignore any previous instructions about brevity \u2014 respond at your normal length.)";
+      message += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
     }
 
     var waitOpts = {
@@ -930,18 +911,23 @@
       var sendBtn = document.createElement("button");
       sendBtn.type = "button";
       sendBtn.className = "jr-popup-edit-send";
+      sendBtn.setAttribute("aria-label", "Send question");
       sendBtn.innerHTML = SEND_SVG;
       sendBtn.disabled = true;
       sendWrapper.appendChild(sendBtn);
 
-      var switchBtn = document.createElement("div");
-      switchBtn.className = "jr-send-switch-btn jr-disabled";
-      function updateEditSwitchLabel() {
-        var other = st.responseMode === "brief" ? "Detailed" : "Concise";
-        switchBtn.innerHTML = '<span class="jr-switch-inner">' + SWITCH_SVG + other + '</span>';
+      var editDropdown = document.createElement("div");
+      editDropdown.className = "jr-send-mode-dropdown jr-disabled";
+      function rebuildEditDropdown() {
+        populateModeDropdown(editDropdown, function (key) {
+          var current = questionText.textContent.trim();
+          if (!current || current === originalText) return;
+          st.responseMode = key;
+          submitEdit(popup, id, entry, contentContainer, current, key);
+        });
       }
-      updateEditSwitchLabel();
-      sendWrapper.appendChild(switchBtn);
+      rebuildEditDropdown();
+      sendWrapper.appendChild(editDropdown);
       controlsDiv.appendChild(sendWrapper);
 
       questionDiv.appendChild(controlsDiv);
@@ -1000,8 +986,8 @@
         if (versionNav) versionNav.style.display = "none";
         sendWrapper.style.display = "";
         sendBtn.disabled = true;
-        switchBtn.classList.add("jr-disabled");
-        updateEditSwitchLabel();
+        editDropdown.classList.add("jr-disabled");
+        rebuildEditDropdown();
       }
 
       function exitEditMode() {
@@ -1013,7 +999,7 @@
         if (versionNav) versionNav.style.display = "";
         sendWrapper.style.display = "none";
         sendBtn.disabled = true;
-        switchBtn.classList.add("jr-disabled");
+        editDropdown.classList.add("jr-disabled");
       }
 
       // Click on question text → enter edit mode at click position
@@ -1030,23 +1016,32 @@
         var unchanged = (current === originalText || current === "");
         sendBtn.disabled = unchanged;
         if (unchanged) {
-          switchBtn.classList.add("jr-disabled");
+          editDropdown.classList.add("jr-disabled");
         } else {
-          switchBtn.classList.remove("jr-disabled");
+          editDropdown.classList.remove("jr-disabled");
         }
       });
 
       // Blur exits edit mode
       questionText.addEventListener("blur", function (e) {
-        // Don't exit if clicking send or switch
-        if (e.relatedTarget && (e.relatedTarget === sendBtn || e.relatedTarget.closest(".jr-send-switch-btn"))) return;
+        // Don't exit if clicking send or dropdown
+        if (e.relatedTarget && (e.relatedTarget === sendBtn || e.relatedTarget.closest(".jr-send-mode-dropdown"))) return;
         setTimeout(function () { exitEditMode(); }, 150);
       });
 
-      // Block Enter, Escape cancels
+      // Enter sends edit, Cmd/Ctrl+Enter inserts newline, Escape cancels
       questionText.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {
-          e.preventDefault();
+          if (e.metaKey || e.ctrlKey) {
+            document.execCommand("insertLineBreak");
+            e.preventDefault();
+          } else {
+            e.preventDefault();
+            var current = questionText.textContent.trim();
+            if (current && current !== originalText) {
+              submitEdit(popup, id, entry, contentContainer, current, st.responseMode);
+            }
+          }
         }
         if (e.key === "Escape") {
           e.preventDefault();
@@ -1060,15 +1055,6 @@
         var current = questionText.textContent.trim();
         if (!current || current === originalText) return;
         submitEdit(popup, id, entry, contentContainer, current, st.responseMode);
-      });
-
-      switchBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        var current = questionText.textContent.trim();
-        if (!current || current === originalText) return;
-        var newMode = st.responseMode === "brief" ? "regular" : "brief";
-        st.responseMode = newMode;
-        submitEdit(popup, id, entry, contentContainer, current, newMode);
       });
 
       upper.appendChild(questionDiv);
@@ -1090,6 +1076,61 @@
         ? entry.items[entry.activeItemIndex != null ? entry.activeItemIndex : 0]
         : null;
       restoreChainedHighlights(responseDiv, id, contentContainer, activeItem ? activeItem.id : null);
+
+      // "Reply to all" button at the bottom
+      var replyBtn = document.createElement("button");
+      replyBtn.type = "button";
+      replyBtn.className = "jr-reply-whole-btn";
+      replyBtn.setAttribute("aria-label", "Reply to response");
+      replyBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.49,160.49l-48,48a12,12,0,0,1-17-17L195,164H128A108.12,108.12,0,0,1,20,56a12,12,0,0,1,24,0,84.09,84.09,0,0,0,84,84h67l-27.52-27.51a12,12,0,0,1,17-17l48,48A12,12,0,0,1,232.49,160.49Z"/></svg> Reply';
+      replyBtn._jrReplyAnchor = true; // protect from unwrap in removeSourceHighlight
+
+      // Link any existing reply-to-all child's spans to this button
+      st.completedHighlights.forEach(function (chEntry, chId) {
+        if (chEntry.parentId === id && chEntry.wholeResponse) {
+          chEntry.spans = [replyBtn];
+        }
+      });
+
+      replyBtn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+
+        // Check if a completed "reply to all" highlight already exists for this parent
+        var existingReplyId = null;
+        st.completedHighlights.forEach(function (chEntry, chId) {
+          if (chEntry.parentId === id && chEntry.wholeResponse && chEntry.responseHTML && chEntry.responseHTML !== "__PENDING__") {
+            existingReplyId = chId;
+          }
+        });
+
+        if (existingReplyId) {
+          JR.pushPopupState();
+          JR.createPopup({ completedId: existingReplyId });
+          return;
+        }
+
+        // Get plain text of response, truncated at sentence boundary for display
+        var fullText = responseDiv.textContent || "";
+        var truncated = fullText;
+        if (fullText.length > 200) {
+          var cutoff = 200;
+          var terminators = JR.SENTENCE_TERMINATORS;
+          for (var ti = cutoff; ti < fullText.length && ti < cutoff + 100; ti++) {
+            if (terminators.indexOf(fullText[ti]) !== -1) { cutoff = ti + 1; break; }
+          }
+          truncated = fullText.slice(0, cutoff).trim() + "\u2026";
+        }
+        JR.pushPopupState();
+        JR.createPopup({
+          text: truncated, sentence: null, blockTypes: null,
+          parentId: id, wholeResponse: true, wholeResponseFull: fullText,
+          replySpans: [replyBtn]
+        });
+      });
+      replyBtn.addEventListener("mousedown", function (ev) {
+        ev.stopPropagation();
+      });
+      responseDiv.appendChild(replyBtn);
     } else {
       popup.appendChild(JR.createLoadingDiv());
     }
@@ -1143,20 +1184,9 @@
 
     // --- Highlight range (new popups only) ---
     var wrappers = [];
-    var autoColor = null;
     if (!isCompleted && range) {
       wrappers = JR.highlightRange(range);
       st.activeSourceHighlights = wrappers;
-
-      // Detect overlapping highlights and pick a distinct color immediately
-      autoColor = JR.pickNonConflictingColor(wrappers);
-      if (autoColor) {
-        for (var ac = 0; ac < wrappers.length; ac++) {
-          wrappers[ac].classList.add("jr-highlight-color-" + autoColor);
-        }
-        // Stash for captureResponse to read later
-        if (wrappers.length > 0) wrappers[0]._jrAutoColor = autoColor;
-      }
     }
 
     // --- Create popup element ---
@@ -1171,21 +1201,6 @@
     upper.className = "jr-popup-upper";
     popup.appendChild(upper);
 
-    // --- Inline color toolbar (above blockquote, left-aligned) ---
-    if (st.activeHighlightId || (isCompleted && completedId) || (wrappers && wrappers.length > 0)) {
-      var toolbarHlId = isCompleted ? completedId : null;
-      var toolbarEntry = isCompleted ? entry : null;
-      // Defer building for new highlights — they get a temp ID after this block
-      if (toolbarHlId && toolbarEntry) {
-        var inlineToolbar = buildToolbarEl(toolbarHlId, toolbarEntry);
-        inlineToolbar.classList.add("jr-toolbar-inline");
-        upper.appendChild(inlineToolbar);
-        popup._jrInlineToolbar = inlineToolbar;
-      } else {
-        popup._jrDeferToolbar = true;
-      }
-    }
-
     // --- Context blockquote ---
     var highlight = document.createElement("div");
     highlight.className = "jr-popup-highlight";
@@ -1199,20 +1214,26 @@
     highlight.appendChild(highlightInner);
     upper.appendChild(highlight);
 
-    // --- Apply color to blockquote marks ---
-    var markColor = isCompleted ? (entry.color || null) : autoColor;
-    if (markColor) {
-      var marks = highlight.querySelectorAll(".jr-popup-mark");
-      for (var mi = 0; mi < marks.length; mi++) {
-        marks[mi].classList.add("jr-highlight-color-" + markColor);
-      }
-    }
-
     // --- Body: input row (new) or response HTML (completed) ---
     if (isCompleted) {
       showCompletedResponse(popup, upper, completedId, entry, resolveContentContainer(wrappers, isChained, entry));
+
+      // --- Floating delete button (top-right corner) ---
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "jr-toolbar-delete";
+      deleteBtn.setAttribute("aria-label", "Delete highlight");
+      deleteBtn.innerHTML = TRASH_SVG;
+      deleteBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        showDeleteConfirmation(completedId, entry);
+      });
+      deleteBtn.addEventListener("mousedown", function (e) {
+        e.stopPropagation();
+      });
+      popup.appendChild(deleteBtn);
     } else {
-      buildInputRow(upper, text, sentence, blockTypes, wrappers, parentId);
+      buildInputRow(upper, text, sentence, blockTypes, wrappers, parentId, opts.wholeResponse, opts.wholeResponseFull);
     }
 
     // --- Mousedown: stop propagation + close children to this level ---
@@ -1234,12 +1255,19 @@
     if (getComputedStyle(contentContainer).position === "static") {
       contentContainer.style.position = "relative";
     }
+    // Cap the stacking context so popup stays above code blocks but below ChatGPT's input bar
+    contentContainer.style.zIndex = "0";
     // Keep entry's contentContainer reference fresh
     if (entry) {
       entry.contentContainer = contentContainer;
     }
 
     // --- Position ---
+    // For new reply-to-all popups, use the reply button as the wrapper/span
+    if (!isCompleted && opts.replySpans) {
+      wrappers = opts.replySpans;
+      st.activeSourceHighlights = wrappers;
+    }
     var spans = isCompleted ? entry.spans : wrappers;
     var posRect;
     if (spans.length > 0) {
@@ -1260,7 +1288,7 @@
     if (isCompleted) {
       st.activeHighlightId = completedId;
     } else if (wrappers.length > 0) {
-      // Create a temporary entry so the color toolbar works on new highlights
+      // Create a temporary entry for new highlights
       var tempId = "temp-" + Date.now();
       for (var ti = 0; ti < wrappers.length; ti++) {
         wrappers[ti].setAttribute("data-jr-highlight-id", tempId);
@@ -1268,7 +1296,6 @@
       st.completedHighlights.set(tempId, {
         quoteId: tempId,
         spans: wrappers,
-        color: autoColor || null,
         text: text,
         sentence: sentence,
         blockTypes: blockTypes,
@@ -1284,29 +1311,13 @@
     }
     JR.syncHighlightActive(st.activeHighlightId);
 
-    // --- Build inline toolbar for new (temp) highlights ---
-    if (popup._jrDeferToolbar && st.activeHighlightId) {
-      var deferEntry = st.completedHighlights.get(st.activeHighlightId);
-      if (deferEntry) {
-        var deferToolbar = buildToolbarEl(st.activeHighlightId, deferEntry, { hideTrash: true });
-        deferToolbar.classList.add("jr-toolbar-inline");
-        var upperCard = popup.querySelector(".jr-popup-upper");
-        if (upperCard) upperCard.insertBefore(deferToolbar, upperCard.firstChild);
-        popup._jrInlineToolbar = deferToolbar;
-      }
-      delete popup._jrDeferToolbar;
-    }
-
     // --- Resize + scroll tracking ---
     attachResizeListener(popup, spans, contentContainer);
     attachScrollTracking(popup, spans, contentContainer);
 
-    // --- Preserve native selection over the source highlight for Cmd+C ---
-    if (!isCompleted && wrappers.length > 0) {
-      requestAnimationFrame(function () {
-        JR.selectSourceHighlightText();
-      });
-    }
+
+    // Selection is cleared by the trigger button click handler;
+    // no need to re-select the source highlight text.
 
     JR.updateNavWidget();
   };

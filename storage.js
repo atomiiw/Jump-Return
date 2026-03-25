@@ -115,7 +115,7 @@ async function getHighlights() {
  * @param {string|null} [opts.color] - Highlight color name
  * @param {boolean} [opts.active] - Whether this is the active version (default true)
  */
-async function saveHighlight({ id, quoteId, text, sentence, blockTypes, responseHTML, url, site, parentId = null, parentItemId = null, sourceTurnIndex = null, questionIndex = null, responseIndex = null, question = null, color = null, active = true }) {
+async function saveHighlight({ id, quoteId, text, sentence, blockTypes, responseHTML, url, site, parentId = null, parentItemId = null, sourceTurnIndex = null, questionIndex = null, responseIndex = null, question = null, color = null, active = true, wholeResponse = false }) {
   if (!isContextValid()) return null;
   const highlights = await getHighlights();
   const newQuoteId = quoteId || crypto.randomUUID();
@@ -137,6 +137,7 @@ async function saveHighlight({ id, quoteId, text, sentence, blockTypes, response
     responseIndex,
     createdAt: Date.now(),
     active: active !== false,
+    wholeResponse: !!wholeResponse,
   };
 
   // If adding a new active version, deactivate siblings
