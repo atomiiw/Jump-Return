@@ -5,6 +5,17 @@
   var S = JR.SELECTORS;
   var st = JR.state;
 
+  // Block ChatGPT's stop button while a Popup question is generating.
+  // Uses capture phase so it fires before ChatGPT's own handler.
+  document.addEventListener("click", function (e) {
+    if (!st.responseWatchActive) return;
+    var stopBtn = e.target.closest(S.stopButton);
+    if (stopBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+
   // --- Chat injection ---
 
   JR.findSendButton = function () {
@@ -92,7 +103,7 @@
    * @param {function} [opts.beforeSend] - Called right before injection (UI setup: show loading, lock scroll, etc.). Receives opts.waitOpts and should mutate it (e.g. set turnsBefore).
    */
   JR.enqueueMessage = function (opts) {
-    if (JR.isGenerating() || st.responseWatchActive) {
+    if (!opts.force && (JR.isGenerating() || st.responseWatchActive)) {
       st.messageQueue.push(opts);
       return;
     }
@@ -101,9 +112,62 @@
 
   function sendQueued(opts) {
     if (opts.beforeSend) opts.beforeSend(opts.waitOpts);
+
+    // Offline check: skip injection entirely, save __TIMEOUT__ immediately
+    if (!navigator.onLine) {
+      var w = opts.waitOpts;
+      immediateTimeout(w);
+      JR.drainQueue();
+      return;
+    }
+
     JR.injectAndSend(opts.message);
     var w = opts.waitOpts;
     JR.waitForResponse(w.popup, w.turnsBefore, w.text, w.sentence, w.blockTypes, w.unlockScroll, w.parentId, w.question, w.editOpts, w.preRegisteredHlId, w.preRegisteredItemId);
+  }
+
+  /**
+   * Immediately save __TIMEOUT__ for a message that was never sent (e.g. offline).
+   * Mirrors saveTimeoutVersion logic but without needing a waitForResponse context.
+   */
+  function immediateTimeout(w) {
+    var hlId = w.editOpts ? w.editOpts.hlId : (w.preRegisteredHlId || null);
+    if (!hlId) return;
+    var memEntry = st.completedHighlights.get(hlId);
+    if (!memEntry) return;
+
+    if (w.editOpts) {
+      var newItemId = crypto.randomUUID();
+      memEntry.items.push({ id: newItemId, question: w.question, responseHTML: "__TIMEOUT__", questionIndex: -1, responseIndex: -1 });
+      memEntry.activeItemIndex = memEntry.items.length - 1;
+      memEntry.question = w.question;
+      memEntry.responseHTML = "__TIMEOUT__";
+      saveHighlight({
+        id: newItemId, quoteId: hlId, text: memEntry.text, sentence: memEntry.sentence,
+        blockTypes: memEntry.blockTypes, responseHTML: "__TIMEOUT__", question: w.question,
+        url: location.href, site: "chatgpt",
+        parentId: memEntry.parentId || null, parentItemId: memEntry.parentItemId || null,
+        sourceTurnIndex: -1, questionIndex: -1, responseIndex: -1, active: true,
+        wholeResponse: !!memEntry.wholeResponse,
+      });
+    } else {
+      var itemIdx = memEntry.activeItemIndex || 0;
+      if (memEntry.items && memEntry.items[itemIdx]) {
+        memEntry.items[itemIdx].responseHTML = "__TIMEOUT__";
+      }
+      memEntry.responseHTML = "__TIMEOUT__";
+      var updateId = w.preRegisteredItemId || (memEntry.items && memEntry.items[itemIdx] ? memEntry.items[itemIdx].id : null);
+      if (updateId) {
+        updateHighlightFields(updateId, { responseHTML: "__TIMEOUT__" });
+      }
+    }
+
+    // Rebuild popup
+    var targetPopup = w.popup;
+    if (targetPopup && targetPopup.isConnected) {
+      JR.rebuildPopupAfterEdit(targetPopup, hlId);
+    }
+    JR.updateNavWidget();
   }
 
   /**
@@ -273,6 +337,151 @@
       if (responseTurn) responseTurn.classList.remove("jr-hidden");
     }
 
+    function showTimeoutUI(targetPopup) {
+      if (!targetPopup || !targetPopup.isConnected) return;
+      var streamDiv = targetPopup.querySelector(".jr-popup-response");
+      if (streamDiv) streamDiv.remove();
+      var existingLoading = targetPopup.querySelector(".jr-popup-loading");
+      if (existingLoading) existingLoading.remove();
+
+      var timeoutDiv = document.createElement("div");
+      timeoutDiv.className = "jr-popup-loading";
+
+      var msg = document.createElement("div");
+      msg.textContent = "Couldn\u2019t get a response";
+      timeoutDiv.appendChild(msg);
+
+      var retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.className = "jr-retry-btn";
+      retryBtn.title = "Try again";
+      retryBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M244,56v48a12,12,0,0,1-12,12H184a12,12,0,1,1,0-24H201.1l-19-17.38c-.13-.12-.26-.24-.38-.37A76,76,0,1,0,127,204h1a75.53,75.53,0,0,0,52.15-20.72,12,12,0,0,1,16.49,17.45A99.45,99.45,0,0,1,128,228h-1.37A100,100,0,1,1,198.51,57.06L220,76.72V56a12,12,0,0,1,24,0Z"/></svg>';
+      retryBtn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        timeoutDiv.remove();
+
+        // Rebuild the message
+        var retryMessage;
+        if (sentence) {
+          retryMessage = 'Regarding this part of your response:\n"' + sentence + '"\n\nSpecifically: "' + text + '"\n\n' + question;
+        } else {
+          retryMessage = 'Regarding this part of your response:\n"' + text + '"\n\n' + question;
+        }
+        if (st.responseMode === "concise") {
+          retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
+        } else {
+          retryMessage += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
+        }
+
+        // Reset item to __PENDING__ so captureResponse overwrites in-place
+        var retryHlId = editOpts ? editOpts.hlId : (preRegisteredHlId || detachedHlId);
+        if (retryHlId) {
+          var retryEntry = st.completedHighlights.get(retryHlId);
+          if (retryEntry) {
+            retryEntry.responseHTML = "__PENDING__";
+            var retryIdx = retryEntry.activeItemIndex || 0;
+            if (retryEntry.items && retryEntry.items[retryIdx]) {
+              retryEntry.items[retryIdx].responseHTML = "__PENDING__";
+            }
+          }
+        }
+        var retryItemId = null;
+        if (retryHlId) {
+          var re = st.completedHighlights.get(retryHlId);
+          if (re && re.items) {
+            var ri2 = re.activeItemIndex || 0;
+            if (re.items[ri2]) retryItemId = re.items[ri2].id;
+          }
+        }
+
+        targetPopup.appendChild(JR.createLoadingDiv());
+
+        JR.enqueueMessage({
+          force: true,
+          message: retryMessage,
+          waitOpts: {
+            popup: targetPopup, turnsBefore: 0, text: text, sentence: sentence,
+            blockTypes: blockTypes, unlockScroll: null, parentId: parentId,
+            question: question,
+            preRegisteredHlId: retryHlId, preRegisteredItemId: retryItemId
+          },
+          beforeSend: function (w) {
+            w.turnsBefore = document.querySelectorAll(S.aiTurn).length;
+            var scrollAnchor = document.querySelector(S.aiTurn) || document.body;
+            var chatScrollParent = JR.getScrollParent(scrollAnchor);
+            w.unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
+          },
+        });
+      });
+      timeoutDiv.appendChild(retryBtn);
+      targetPopup.appendChild(timeoutDiv);
+    }
+
+    /**
+     * Save __TIMEOUT__ as a concrete version and rebuild the popup.
+     * Works for both new highlights (preRegisteredHlId) and edits (editOpts).
+     */
+    function saveTimeoutVersion() {
+      var hlId = editOpts ? editOpts.hlId : (preRegisteredHlId || detachedHlId);
+      if (!hlId) return;
+      var memEntry = st.completedHighlights.get(hlId);
+      if (!memEntry) return;
+
+      var qNum = questionTurn ? JR.getTurnNumber(questionTurn) : -1;
+
+      if (editOpts) {
+        // Edit: create a new version item with __TIMEOUT__
+        var newItemId = crypto.randomUUID();
+        var newItem = { id: newItemId, question: question, responseHTML: "__TIMEOUT__", questionIndex: qNum, responseIndex: -1 };
+        memEntry.items.push(newItem);
+        memEntry.activeItemIndex = memEntry.items.length - 1;
+        memEntry.question = question;
+        memEntry.responseHTML = "__TIMEOUT__";
+        saveHighlight({
+          id: newItemId, quoteId: hlId, text: text, sentence: sentence,
+          blockTypes: blockTypes, responseHTML: "__TIMEOUT__", question: question,
+          url: location.href, site: "chatgpt",
+          parentId: parentId || null, parentItemId: (memEntry && memEntry.parentItemId) || parentItemId || null,
+          sourceTurnIndex: memEntry.spans && memEntry.spans[0] ? JR.getTurnNumber(memEntry.spans[0].closest(S.aiTurn)) : -1,
+          questionIndex: qNum, responseIndex: -1, active: true,
+          wholeResponse: memEntry ? !!memEntry.wholeResponse : false,
+        });
+      } else {
+        // New highlight (pre-registered or detached): update the pending item to __TIMEOUT__
+        var itemIdx = memEntry.activeItemIndex || 0;
+        if (memEntry.items && memEntry.items.length > itemIdx) {
+          memEntry.items[itemIdx].responseHTML = "__TIMEOUT__";
+          memEntry.items[itemIdx].questionIndex = qNum;
+        }
+        memEntry.responseHTML = "__TIMEOUT__";
+        var updateId = preRegisteredItemId
+          || (memEntry.items && memEntry.items[itemIdx] ? memEntry.items[itemIdx].id : null);
+        if (updateId) {
+          updateHighlightFields(updateId, {
+            responseHTML: "__TIMEOUT__", questionIndex: qNum,
+          });
+        }
+      }
+
+      // Rebuild popup if it's open for this highlight
+      var targetPopup = getStreamTarget() || popup;
+      if (targetPopup && targetPopup.isConnected) {
+        JR.rebuildPopupAfterEdit(targetPopup, hlId);
+      }
+
+      // Hide ALL turns created after turnsBefore — covers cases where
+      // the poll didn't find them before the timeout fired
+      var allTurnsNow = document.querySelectorAll(S.aiTurn);
+      for (var hti = turnsBefore; hti < allTurnsNow.length; hti++) {
+        var hideTurn = allTurnsNow[hti];
+        hideTurn.classList.add("jr-hidden");
+        var hideIdx = JR.getTurnNumber(hideTurn);
+        JR.addHiddenTurnIndex(hideIdx);
+        addDeletedTurns(location.href, [hideIdx]);
+      }
+      JR.updateNavWidget();
+    }
+
     function cleanup() {
       st.responseWatchActive = false;
       if (streamObserver) {
@@ -292,6 +501,10 @@
     function getStreamTarget() {
       if (!detached && popup && popup.isConnected) return popup;
       if (detached && detachedHlId && st.activePopup && st.activePopup.isConnected) {
+        // Match by highlight ID — check both span attribute and active state
+        if (st.activeHighlightId === detachedHlId) {
+          return st.activePopup;
+        }
         if (st.activeSourceHighlights.length > 0 &&
             st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === detachedHlId) {
           return st.activePopup;
@@ -436,6 +649,17 @@
 
       responseTurn.classList.add("jr-hidden");
 
+      // If response is empty (user stopped, error), save as __TIMEOUT__
+      var earlyMarkdown = responseTurn.querySelector(S.responseContent);
+      var earlyText = earlyMarkdown ? (earlyMarkdown.textContent || "").trim() : "";
+      if (earlyText.length < 1) {
+        cleanup();
+        saveTimeoutVersion();
+        st.cancelResponseWatch = null;
+        JR.drainQueue();
+        return;
+      }
+
       // --- Edit mode: save new item with same quoteId ---
       if (editOpts) {
         var hlId = editOpts.hlId;
@@ -483,8 +707,8 @@
         // Rebuild popup UI if it's open for this highlight
         if (!detached && popup && popup.isConnected) {
           JR.rebuildPopupAfterEdit(popup, hlId);
-        } else if (detached && st.activePopup && st.activeSourceHighlights.length > 0 &&
-                   st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId) {
+        } else if (detached && st.activePopup && (st.activeHighlightId === hlId ||
+                   (st.activeSourceHighlights.length > 0 && st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId))) {
           JR.rebuildPopupAfterEdit(st.activePopup, hlId);
         }
 
@@ -497,12 +721,18 @@
       }
 
       // --- Normal (non-edit) capture ---
-      // Always capture responseHTML from the ORIGINAL turn, not from the popup div.
-      // The popup div may have been modified by rebuildCodeBlocks (replaces <pre> with
-      // custom .jr-code-block that has dead event listeners when deserialized from storage).
       var responseHTML = null;
       var markdown2 = responseTurn.querySelector(S.responseContent);
       if (markdown2) responseHTML = markdown2.innerHTML;
+
+      // If response is empty (user stopped, error), save as __TIMEOUT__ instead
+      var responseText = markdown2 ? (markdown2.textContent || "").trim() : "";
+      if (responseText.length < 1) {
+        saveTimeoutVersion();
+        st.cancelResponseWatch = null;
+        JR.drainQueue();
+        return;
+      }
       // Clean up scroll lock + observers. Skip the intermediate
       // showResponseInPopup + repositionPopup — rebuildPopupAfterEdit
       // (called below) will strip and rebuild the popup content anyway.
@@ -518,20 +748,32 @@
         if (entry) {
           entry.responseHTML = responseHTML;
           entry.responseIndex = rNum2;
-          // Update pending items with real data
-          if (entry.items && entry.items.length > 0 && entry.items[0].responseHTML === "__PENDING__") {
+          // Update the specific pending item by preRegisteredItemId
+          var foundDetachItem = false;
+          if (entry.items && preRegisteredItemId) {
+            for (var di = 0; di < entry.items.length; di++) {
+              if (entry.items[di].id === preRegisteredItemId) {
+                entry.items[di].responseHTML = responseHTML;
+                entry.items[di].questionIndex = qNum2;
+                entry.items[di].responseIndex = rNum2;
+                foundDetachItem = true;
+                break;
+              }
+            }
+          }
+          if (!foundDetachItem && entry.items && entry.items.length > 0 && entry.items[0].responseHTML === "__PENDING__") {
             entry.items[0].responseHTML = responseHTML;
             entry.items[0].questionIndex = qNum2;
             entry.items[0].responseIndex = rNum2;
-          } else if (!entry.items || entry.items.length === 0) {
+          } else if (!foundDetachItem && (!entry.items || entry.items.length === 0)) {
             var detItemId = crypto.randomUUID();
             entry.items = [{ id: detItemId, question: question || null, responseHTML: responseHTML, questionIndex: qNum2, responseIndex: rNum2 }];
             entry.activeItemIndex = 0;
           }
         }
 
-        if (st.activePopup && st.activeSourceHighlights.length > 0 &&
-            st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId2) {
+        if (st.activePopup && (st.activeHighlightId === hlId2 ||
+            (st.activeSourceHighlights.length > 0 && st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId2))) {
           st.activeHighlightId = hlId2;
           JR.syncHighlightActive(hlId2);
           JR.rebuildPopupAfterEdit(st.activePopup, hlId2);
@@ -543,7 +785,20 @@
         if (preEntry) {
           preEntry.responseHTML = responseHTML;
           preEntry.responseIndex = rNum2;
-          if (preEntry.items && preEntry.items.length > 0) {
+          // Find the specific item by preRegisteredItemId
+          var foundPreItem = false;
+          if (preEntry.items && preRegisteredItemId) {
+            for (var pi2 = 0; pi2 < preEntry.items.length; pi2++) {
+              if (preEntry.items[pi2].id === preRegisteredItemId) {
+                preEntry.items[pi2].responseHTML = responseHTML;
+                preEntry.items[pi2].questionIndex = qNum2;
+                preEntry.items[pi2].responseIndex = rNum2;
+                foundPreItem = true;
+                break;
+              }
+            }
+          }
+          if (!foundPreItem && preEntry.items && preEntry.items.length > 0) {
             preEntry.items[0].responseHTML = responseHTML;
             preEntry.items[0].questionIndex = qNum2;
             preEntry.items[0].responseIndex = rNum2;
@@ -680,6 +935,22 @@
         if (!label || !label.textContent.includes(JR.AI_LABEL_TEXT)) {
           questionTurn = candidate;
           questionTurn.classList.add("jr-hidden");
+          var qIdx = JR.getTurnNumber(questionTurn);
+          JR.addHiddenTurnIndex(qIdx);
+          // Write to BOTH storage keys so it survives reload even if one write fails
+          addDeletedTurns(location.href, [qIdx]);
+          var saveId = preRegisteredItemId || (editOpts ? editOpts.hlId : null);
+          if (saveId) {
+            var hlRec = st.completedHighlights.get(preRegisteredHlId || (editOpts && editOpts.hlId));
+            if (hlRec && hlRec.items) {
+              var oldItem = hlRec.items[hlRec.activeItemIndex || 0];
+              if (oldItem && oldItem.questionIndex > 0 && oldItem.questionIndex !== qIdx) {
+                addDeletedTurns(location.href, [oldItem.questionIndex]);
+                JR.addHiddenTurnIndex(oldItem.questionIndex);
+              }
+            }
+            updateHighlightFields(saveId, { questionIndex: qIdx });
+          }
           JR.repositionPopup();
         }
       }
@@ -689,6 +960,21 @@
         var label2 = candidate2.querySelector(S.aiLabel);
         if (label2 && label2.textContent.includes(JR.AI_LABEL_TEXT)) {
           responseTurn = candidate2;
+          var rIdx = JR.getTurnNumber(responseTurn);
+          JR.addHiddenTurnIndex(rIdx);
+          addDeletedTurns(location.href, [rIdx]);
+          var rSaveId = preRegisteredItemId || (editOpts ? editOpts.hlId : null);
+          if (rSaveId) {
+            var hlRec2 = st.completedHighlights.get(preRegisteredHlId || (editOpts && editOpts.hlId));
+            if (hlRec2 && hlRec2.items) {
+              var oldItem2 = hlRec2.items[hlRec2.activeItemIndex || 0];
+              if (oldItem2 && oldItem2.responseIndex > 0 && oldItem2.responseIndex !== rIdx) {
+                addDeletedTurns(location.href, [oldItem2.responseIndex]);
+                JR.addHiddenTurnIndex(oldItem2.responseIndex);
+              }
+            }
+            updateHighlightFields(rSaveId, { responseIndex: rIdx });
+          }
           startStreaming();
         }
       }
@@ -697,8 +983,10 @@
       enforceHidden();
 
       if (responseTurn && !JR.isGenerating()) {
-        // Delay capture slightly — ChatGPT's markdown renderer may still be
-        // processing the final tokens after the stop button disappears.
+        // Capture after a brief delay for React to finish rendering.
+        // Force-hide the response turn now and sync content to popup immediately.
+        responseTurn.classList.add("jr-hidden");
+        if (streamObserver) syncStreamContent();
         setTimeout(captureResponse, 300);
         return;
       }
@@ -717,53 +1005,35 @@
         }
       }
 
-      if (Date.now() - startTime >= timeoutMs) {
+      // Quick timeout: if generation already stopped and no response, don't wait 5s
+      if (!responseTurn && !JR.isGenerating() && Date.now() - startTime >= 1500) {
         cleanup();
-        unhideTurns();
+        saveTimeoutVersion();
+        st.cancelResponseWatch = null;
+        JR.drainQueue();
+        return;
+      }
 
-        function showTimeoutUI(targetPopup) {
-          if (!targetPopup || !targetPopup.isConnected) return;
-          var streamDiv = targetPopup.querySelector(".jr-popup-response");
-          if (streamDiv) streamDiv.remove();
-          var existingLoading = targetPopup.querySelector(".jr-popup-loading");
-          if (existingLoading) existingLoading.remove();
-
-          var timeoutDiv = document.createElement("div");
-          timeoutDiv.className = "jr-popup-loading";
-          timeoutDiv.textContent = "Couldn\u2019t get a response";
-          targetPopup.appendChild(timeoutDiv);
-        }
-
-        if (editOpts) {
-          if (!detached && popup && popup.isConnected) {
-            showTimeoutUI(popup);
-          }
+      // Hard 10-second timeout: if no meaningful response content exists
+      // AND ChatGPT is NOT actively generating, force-stop and save __TIMEOUT__.
+      // If isGenerating() is true, ChatGPT is working — let it continue.
+      if (Date.now() - startTime >= 10000) {
+        var md5 = responseTurn ? responseTurn.querySelector(S.responseContent) : null;
+        var hasRealContent = md5 && (md5.textContent || "").trim().length >= 1;
+        if (!hasRealContent) {
+          var stopBtn = document.querySelector(S.stopButton);
+          if (stopBtn) stopBtn.click();
+          cleanup();
+          saveTimeoutVersion();
           st.cancelResponseWatch = null;
           JR.drainQueue();
           return;
         }
-        if (!detached) {
-          showTimeoutUI(popup);
-        }
-        if (detached && detachedSpans) {
-          if (preRegisteredHlId) {
-            // Pre-registered highlight persists with __PENDING__ — don't remove
-            detachedSpans = null;
-          } else {
-            if (detachedHlId) st.completedHighlights.delete(detachedHlId);
-            for (var ds = 0; ds < detachedSpans.length; ds++) {
-              var span = detachedSpans[ds];
-              span.removeAttribute("data-jr-highlight-id");
-              span.classList.remove("jr-source-highlight-done");
-              var parent = span.parentNode;
-              if (!parent) continue;
-              while (span.firstChild) parent.insertBefore(span.firstChild, span);
-              parent.removeChild(span);
-              parent.normalize();
-            }
-            detachedSpans = null;
-          }
-        }
+      }
+
+      if (Date.now() - startTime >= timeoutMs) {
+        cleanup();
+        saveTimeoutVersion();
         st.cancelResponseWatch = null;
         JR.drainQueue();
         return;

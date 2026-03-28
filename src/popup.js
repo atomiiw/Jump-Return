@@ -212,7 +212,9 @@
       var popupW = popup.offsetWidth;
       var cW = contentContainer.clientWidth;
       var left = r.left - cRect.left + r.width / 2 - popupW / 2;
-      left = Math.max(8, Math.min(left, cW - popupW - 8));
+      var minLeft = JR.getPopupMinLeft() - cRect.left;
+      var maxLeft = JR.getPopupMaxRight() - cRect.left - popupW;
+      left = Math.max(minLeft, Math.min(left, cW - popupW - 8, maxLeft));
       popup.style.left = left + "px";
       JR.updateArrow(popup, r, cRect, left);
     };
@@ -509,8 +511,7 @@
 
     // Build confirm card inside the popup (after counting descendants)
     countDescendants(hlId).then(function (count) {
-      // Save popup children so we can restore on cancel (done inside .then to avoid empty-frame flicker)
-      // Clone the arrow so the confirm view has one too
+      // Save popup children so we can restore on cancel
       var arrowEl = popup.querySelector(".jr-popup-arrow");
       var arrowClone = arrowEl ? arrowEl.cloneNode(true) : null;
       var savedChildren = [];
@@ -519,7 +520,7 @@
       }
       if (arrowClone) popup.appendChild(arrowClone);
       var confirmCard = document.createElement("div");
-      confirmCard.className = "jr-popup-upper jr-popup-delete-confirm";
+      confirmCard.className = "jr-popup-delete-confirm";
 
       var text = document.createElement("div");
       text.className = "jr-popup-confirm-text";
@@ -682,6 +683,7 @@
     }
 
     function switchVersion(newIdx) {
+      if (JR.removeTriggerBtn) JR.removeTriggerBtn();
       entry.activeItemIndex = newIdx;
       var v = entry.items[newIdx];
       entry.question = v.question;
@@ -692,18 +694,16 @@
       var qText = container.querySelector(".jr-popup-question-text");
       if (qText) qText.textContent = v.question || "";
 
-      // Replace response
+      // Replace response and loading — each version has its own state
       var oldResp = popup.querySelector(".jr-popup-response");
       if (oldResp) oldResp.remove();
+      var oldLoading = popup.querySelector(".jr-popup-loading");
+      if (oldLoading) oldLoading.remove();
 
-      if (v.responseHTML) {
-        var responseDiv = document.createElement("div");
-        responseDiv.className = "jr-popup-response";
-        responseDiv.innerHTML = v.responseHTML;
-        popup.appendChild(responseDiv);
-        rebuildCodeBlocks(responseDiv);
-
-        restoreChainedHighlights(responseDiv, hlId, entry.contentContainer, v.id);
+      if (v.responseHTML && v.responseHTML !== "__PENDING__") {
+        appendResponseWithReply(popup, hlId, entry, entry.contentContainer, v.id);
+      } else {
+        popup.appendChild(JR.createLoadingDiv());
       }
 
       updateNav();
@@ -735,6 +735,7 @@
     // Expose a direct-jump function so external code (Cmd+F search)
     // can switch to any version in one shot without clicking arrows.
     nav._jrSwitchTo = switchVersion;
+    nav._jrUpdateNav = updateNav;
 
     return nav;
   }
@@ -809,22 +810,21 @@
   var SEND_SVG = '<svg class="jr-icon-reg" viewBox="0 0 256 256" fill="currentColor"><path d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></svg><svg class="jr-icon-bold" viewBox="0 0 256 256" fill="currentColor"><path d="M224.49,136.49l-72,72a12,12,0,0,1-17-17L187,140H40a12,12,0,0,1,0-24H187L135.51,64.48a12,12,0,0,1,17-17l72,72A12,12,0,0,1,224.49,136.49Z"/></svg>';
 
   function submitEdit(popup, hlId, entry, contentContainer, newQuestion, mode) {
-    // Exit edit mode visually
+    // Exit edit mode, enter generating state
+    popup.classList.add("jr-popup--generating");
+    var questionDiv = popup.querySelector(".jr-popup-question");
+    if (questionDiv) questionDiv.classList.remove("jr-popup-question--editing");
     var questionText = popup.querySelector(".jr-popup-question-text");
     if (questionText) {
       questionText.contentEditable = "false";
       questionText.textContent = newQuestion;
     }
-    var editBtn = popup.querySelector(".jr-popup-edit-btn");
-    if (editBtn) editBtn.classList.remove("jr-popup-edit-btn--active");
-    var sendWrap = popup.querySelector(".jr-edit-send-wrapper");
-    if (sendWrap) sendWrap.style.display = "none";
 
-    // Remove response and version nav, show loading
+    // Remove response, show loading
     var responseDiv = popup.querySelector(".jr-popup-response");
     if (responseDiv) responseDiv.remove();
-    var versionNav = popup.querySelector(".jr-popup-version-nav");
-    if (versionNav) versionNav.remove();
+    var oldLoading = popup.querySelector(".jr-popup-loading");
+    if (oldLoading) oldLoading.remove();
 
     popup.appendChild(JR.createLoadingDiv());
     JR.repositionPopup();
@@ -867,6 +867,21 @@
   }
 
   function showCompletedResponse(popup, upper, id, entry, contentContainer) {
+    // Always land on the last version
+    if (entry.items && entry.items.length > 0) {
+      var lastIdx = entry.items.length - 1;
+      entry.activeItemIndex = lastIdx;
+      var lastItem = entry.items[lastIdx];
+      // Convert stale __PENDING__ to __TIMEOUT__ (no watch running after reload/reopen)
+      if (lastItem.responseHTML === "__PENDING__" && !st.responseWatchActive) {
+        lastItem.responseHTML = "__TIMEOUT__";
+        updateHighlightFields(lastItem.id, { responseHTML: "__TIMEOUT__" });
+      }
+      entry.question = lastItem.question;
+      entry.responseHTML = lastItem.responseHTML;
+      setActiveItem(id, lastItem.id);
+    }
+
     // Show the question with inline edit toggle
     if (entry.question) {
       var questionDiv = document.createElement("div");
@@ -922,6 +937,7 @@
         populateModeDropdown(editDropdown, function (key) {
           var current = questionText.textContent.trim();
           if (!current || current === originalText) return;
+          editing = false; // prevent blur→exitEditMode from reverting text
           st.responseMode = key;
           submitEdit(popup, id, entry, contentContainer, current, key);
         });
@@ -1039,6 +1055,7 @@
             e.preventDefault();
             var current = questionText.textContent.trim();
             if (current && current !== originalText) {
+              editing = false; // prevent blur→exitEditMode from reverting text
               submitEdit(popup, id, entry, contentContainer, current, st.responseMode);
             }
           }
@@ -1054,6 +1071,7 @@
         e.stopPropagation();
         var current = questionText.textContent.trim();
         if (!current || current === originalText) return;
+        editing = false; // prevent blur→exitEditMode from reverting text
         submitEdit(popup, id, entry, contentContainer, current, st.responseMode);
       });
 
@@ -1064,76 +1082,169 @@
     var staleLoading = popup.querySelector(".jr-popup-loading");
     if (staleLoading) staleLoading.remove();
 
-    if (entry.responseHTML && entry.responseHTML !== "__PENDING__") {
-      var responseDiv = document.createElement("div");
-      responseDiv.className = "jr-popup-response";
-      responseDiv.innerHTML = entry.responseHTML;
-      popup.appendChild(responseDiv);
-      rebuildCodeBlocks(responseDiv);
+    // Trash button (inside showCompletedResponse so rebuildPopupAfterEdit re-creates it)
+    var deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "jr-toolbar-delete";
+    deleteBtn.setAttribute("aria-label", "Delete highlight");
+    deleteBtn.innerHTML = TRASH_SVG;
+    deleteBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      showDeleteConfirmation(id, entry);
+    });
+    deleteBtn.addEventListener("mousedown", function (e) {
+      e.stopPropagation();
+    });
+    popup.appendChild(deleteBtn);
 
-      // Restore chained highlights — only those belonging to the active version
+    if (entry.responseHTML && entry.responseHTML !== "__PENDING__") {
       var activeItem = (entry.items && entry.items.length > 0)
         ? entry.items[entry.activeItemIndex != null ? entry.activeItemIndex : 0]
         : null;
-      restoreChainedHighlights(responseDiv, id, contentContainer, activeItem ? activeItem.id : null);
-
-      // "Reply to all" button at the bottom
-      var replyBtn = document.createElement("button");
-      replyBtn.type = "button";
-      replyBtn.className = "jr-reply-whole-btn";
-      replyBtn.setAttribute("aria-label", "Reply to response");
-      replyBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.49,160.49l-48,48a12,12,0,0,1-17-17L195,164H128A108.12,108.12,0,0,1,20,56a12,12,0,0,1,24,0,84.09,84.09,0,0,0,84,84h67l-27.52-27.51a12,12,0,0,1,17-17l48,48A12,12,0,0,1,232.49,160.49Z"/></svg> Reply';
-      replyBtn._jrReplyAnchor = true; // protect from unwrap in removeSourceHighlight
-
-      // Link any existing reply-to-all child's spans to this button
-      st.completedHighlights.forEach(function (chEntry, chId) {
-        if (chEntry.parentId === id && chEntry.wholeResponse) {
-          chEntry.spans = [replyBtn];
-        }
-      });
-
-      replyBtn.addEventListener("click", function (ev) {
-        ev.stopPropagation();
-
-        // Check if a completed "reply to all" highlight already exists for this parent
-        var existingReplyId = null;
-        st.completedHighlights.forEach(function (chEntry, chId) {
-          if (chEntry.parentId === id && chEntry.wholeResponse && chEntry.responseHTML && chEntry.responseHTML !== "__PENDING__") {
-            existingReplyId = chId;
-          }
-        });
-
-        if (existingReplyId) {
-          JR.pushPopupState();
-          JR.createPopup({ completedId: existingReplyId });
-          return;
-        }
-
-        // Get plain text of response, truncated at sentence boundary for display
-        var fullText = responseDiv.textContent || "";
-        var truncated = fullText;
-        if (fullText.length > 200) {
-          var cutoff = 200;
-          var terminators = JR.SENTENCE_TERMINATORS;
-          for (var ti = cutoff; ti < fullText.length && ti < cutoff + 100; ti++) {
-            if (terminators.indexOf(fullText[ti]) !== -1) { cutoff = ti + 1; break; }
-          }
-          truncated = fullText.slice(0, cutoff).trim() + "\u2026";
-        }
-        JR.pushPopupState();
-        JR.createPopup({
-          text: truncated, sentence: null, blockTypes: null,
-          parentId: id, wholeResponse: true, wholeResponseFull: fullText,
-          replySpans: [replyBtn]
-        });
-      });
-      replyBtn.addEventListener("mousedown", function (ev) {
-        ev.stopPropagation();
-      });
-      responseDiv.appendChild(replyBtn);
-    } else {
+      appendResponseWithReply(popup, id, entry, contentContainer, activeItem ? activeItem.id : null);
+    } else if (entry.responseHTML === "__PENDING__") {
       popup.appendChild(JR.createLoadingDiv());
     }
+  }
+
+  /**
+   * Create a response div with chained highlights and a Reply button.
+   * Shared by showCompletedResponse and switchVersion.
+   */
+  function appendResponseWithReply(popup, hlId, entry, contentContainer, activeItemId) {
+    var activeItem = null;
+    if (entry.items) {
+      for (var ai = 0; ai < entry.items.length; ai++) {
+        if (entry.items[ai].id === activeItemId) { activeItem = entry.items[ai]; break; }
+      }
+    }
+    var html = activeItem ? activeItem.responseHTML : entry.responseHTML;
+
+    // __TIMEOUT__ version — show timeout UI with retry instead of response
+    if (html === "__TIMEOUT__") {
+      var timeoutDiv = document.createElement("div");
+      timeoutDiv.className = "jr-popup-loading";
+      var msg = document.createElement("div");
+      msg.textContent = "Couldn\u2019t get a response";
+      timeoutDiv.appendChild(msg);
+      var retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.className = "jr-retry-btn";
+      retryBtn.title = "Try again";
+      retryBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M244,56v48a12,12,0,0,1-12,12H184a12,12,0,1,1,0-24H201.1l-19-17.38c-.13-.12-.26-.24-.38-.37A76,76,0,1,0,127,204h1a75.53,75.53,0,0,0,52.15-20.72,12,12,0,0,1,16.49,17.45A99.45,99.45,0,0,1,128,228h-1.37A100,100,0,1,1,198.51,57.06L220,76.72V56a12,12,0,0,1,24,0Z"/></svg>';
+      retryBtn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var retryItemId = activeItemId;
+        var retryQuestion = activeItem ? activeItem.question : entry.question;
+        var text = entry.text;
+        var sentence = entry.sentence;
+        var retryMessage;
+        if (entry.wholeResponse) {
+          retryMessage = "Regarding your entire response above:\n\n" + retryQuestion;
+        } else if (sentence) {
+          retryMessage = 'Regarding this part of your response:\n"' + sentence + '"\n\nSpecifically: "' + text + '"\n\n' + retryQuestion;
+        } else {
+          retryMessage = 'Regarding this part of your response:\n"' + text + '"\n\n' + retryQuestion;
+        }
+        if (st.responseMode === "concise") {
+          retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
+        } else {
+          retryMessage += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
+        }
+        // Reset the item back to __PENDING__ so captureResponse overwrites it in-place
+        if (activeItem) activeItem.responseHTML = "__PENDING__";
+        entry.responseHTML = "__PENDING__";
+        // Enter generating state
+        popup.classList.add("jr-popup--generating");
+        timeoutDiv.remove();
+        popup.appendChild(JR.createLoadingDiv());
+        JR.enqueueMessage({
+          force: true,
+          message: retryMessage,
+          waitOpts: {
+            popup: popup, turnsBefore: 0, text: text, sentence: sentence,
+            blockTypes: entry.blockTypes, unlockScroll: null, parentId: entry.parentId,
+            question: retryQuestion,
+            preRegisteredHlId: hlId, preRegisteredItemId: retryItemId
+          },
+          beforeSend: function (w) {
+            w.turnsBefore = document.querySelectorAll(JR.SELECTORS.aiTurn).length;
+            var scrollAnchor = document.querySelector(JR.SELECTORS.aiTurn) || document.body;
+            var chatScrollParent = JR.getScrollParent(scrollAnchor);
+            w.unlockScroll = JR.lockScroll(chatScrollParent, scrollAnchor);
+          },
+        });
+      });
+      retryBtn.addEventListener("mousedown", function (ev) { ev.stopPropagation(); });
+      timeoutDiv.appendChild(retryBtn);
+      popup.appendChild(timeoutDiv);
+      return timeoutDiv;
+    }
+
+    var responseDiv = document.createElement("div");
+    responseDiv.className = "jr-popup-response";
+    if (html) responseDiv.innerHTML = html;
+    popup.appendChild(responseDiv);
+    rebuildCodeBlocks(responseDiv);
+    restoreChainedHighlights(responseDiv, hlId, contentContainer, activeItemId);
+
+    // Reply button — per-version via activeItemId
+    var replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.className = "jr-reply-whole-btn";
+    replyBtn._jrReplyAnchor = true;
+    replyBtn.setAttribute("aria-label", "Reply to response");
+    replyBtn.innerHTML = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.49,160.49l-48,48a12,12,0,0,1-17-17L195,164H128A108.12,108.12,0,0,1,20,56a12,12,0,0,1,24,0,84.09,84.09,0,0,0,84,84h67l-27.52-27.51a12,12,0,0,1,17-17l48,48A12,12,0,0,1,232.49,160.49Z"/></svg> Reply';
+
+    replyBtn.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+
+      // Find existing reply for THIS version (pending or completed)
+      var existingReplyId = null;
+      st.completedHighlights.forEach(function (chEntry, chId) {
+        if (chEntry.parentId === hlId && chEntry.wholeResponse
+            && chEntry.parentItemId === activeItemId) {
+          existingReplyId = chId;
+        }
+      });
+
+      if (existingReplyId) {
+        JR.pushPopupState();
+        JR.createPopup({ completedId: existingReplyId });
+        return;
+      }
+
+      // Truncate response text for display
+      var fullText = responseDiv.textContent || "";
+      var truncated = fullText;
+      if (fullText.length > 200) {
+        var cutoff = 200;
+        var terminators = JR.SENTENCE_TERMINATORS;
+        for (var ti = cutoff; ti < fullText.length && ti < cutoff + 100; ti++) {
+          if (terminators.indexOf(fullText[ti]) !== -1) { cutoff = ti + 1; break; }
+        }
+        truncated = fullText.slice(0, cutoff).trim() + "\u2026";
+      }
+      JR.pushPopupState();
+      JR.createPopup({
+        text: truncated, sentence: null, blockTypes: null,
+        parentId: hlId, wholeResponse: true, wholeResponseFull: fullText
+      });
+      // Auto-focus the input so user can start typing immediately
+      if (st.activePopup) {
+        var replyPopup = st.activePopup;
+        setTimeout(function () {
+          var input = replyPopup.querySelector(".jr-popup-question-text[contenteditable]");
+          if (input) input.focus();
+        }, 50);
+      }
+    });
+    replyBtn.addEventListener("mousedown", function (ev) {
+      ev.stopPropagation();
+    });
+    responseDiv.appendChild(replyBtn);
+
+    return responseDiv;
   }
 
   // --- Unified popup creation ---
@@ -1217,21 +1328,6 @@
     // --- Body: input row (new) or response HTML (completed) ---
     if (isCompleted) {
       showCompletedResponse(popup, upper, completedId, entry, resolveContentContainer(wrappers, isChained, entry));
-
-      // --- Floating delete button (top-right corner) ---
-      var deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "jr-toolbar-delete";
-      deleteBtn.setAttribute("aria-label", "Delete highlight");
-      deleteBtn.innerHTML = TRASH_SVG;
-      deleteBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        showDeleteConfirmation(completedId, entry);
-      });
-      deleteBtn.addEventListener("mousedown", function (e) {
-        e.stopPropagation();
-      });
-      popup.appendChild(deleteBtn);
     } else {
       buildInputRow(upper, text, sentence, blockTypes, wrappers, parentId, opts.wholeResponse, opts.wholeResponseFull);
     }
@@ -1239,6 +1335,10 @@
     // --- Mousedown: stop propagation + close children to this level ---
     popup.addEventListener("mousedown", function (e) {
       e.stopPropagation();
+      // Dismiss trigger button on click inside popup (but not on the trigger itself)
+      if (JR.removeTriggerBtn && !e.target.closest(".jr-highlight-trigger-btn")) {
+        JR.removeTriggerBtn();
+      }
       if (st.activePopup && st.activePopup !== popup && st.popupStack.length > 0) {
         var hlSpan = e.target.closest(".jr-source-highlight");
         if (!hlSpan || st.activeSourceHighlights.indexOf(hlSpan) === -1) {
@@ -1263,12 +1363,18 @@
     }
 
     // --- Position ---
-    // For new reply-to-all popups, use the reply button as the wrapper/span
-    if (!isCompleted && opts.replySpans) {
-      wrappers = opts.replySpans;
-      st.activeSourceHighlights = wrappers;
-    }
     var spans = isCompleted ? entry.spans : wrappers;
+
+    // For reply-to-all popups (new or completed), find the reply button
+    // live from the parent popup DOM — never store DOM refs in entry.spans
+    var isWholeResponse = (isCompleted && entry && entry.wholeResponse) || opts.wholeResponse;
+    if (isWholeResponse && spans.length === 0 && st.popupStack.length > 0) {
+      var parentPopup = st.popupStack[st.popupStack.length - 1].popup;
+      if (parentPopup) {
+        var btn = parentPopup.querySelector(".jr-reply-whole-btn");
+        if (btn) spans = [btn];
+      }
+    }
     var posRect;
     if (spans.length > 0) {
       posRect = JR.getHighlightRect(spans);
@@ -1284,7 +1390,7 @@
 
     // --- Register active state ---
     st.activePopup = popup;
-    st.activeSourceHighlights = isCompleted ? entry.spans : wrappers;
+    st.activeSourceHighlights = spans;
     if (isCompleted) {
       st.activeHighlightId = completedId;
     } else if (wrappers.length > 0) {
@@ -1329,6 +1435,9 @@
   JR.rebuildPopupAfterEdit = function (popup, hlId) {
     var entry = st.completedHighlights.get(hlId);
     if (!entry) return;
+
+    // Exit generating state
+    popup.classList.remove("jr-popup--generating");
 
     // Find the upper card and strip question/version nav from it
     var upper = popup.querySelector(".jr-popup-upper");

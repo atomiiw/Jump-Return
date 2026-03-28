@@ -68,7 +68,16 @@
       for (var ri = 0; ri < rects.length; ri++) {
         if (rects[ri].right > maxRight) maxRight = rects[ri].right;
       }
-      triggerBtn.style.left = Math.min(maxRight + 6, window.innerWidth - btnSize - 4) + "px";
+      // Clamp to the popup edge if selection is inside a popup
+      var rightLimit = window.innerWidth - btnSize - 4;
+      var parentPopup = range.startContainer.nodeType === Node.TEXT_NODE
+        ? range.startContainer.parentElement && range.startContainer.parentElement.closest(".jr-popup")
+        : range.startContainer.closest && range.startContainer.closest(".jr-popup");
+      if (parentPopup) {
+        var popupRect = parentPopup.getBoundingClientRect();
+        rightLimit = popupRect.right - btnSize - 6;
+      }
+      triggerBtn.style.left = Math.min(maxRight + 6, rightLimit) + "px";
       triggerBtn.style.top = (r.top + r.height / 2 - (triggerBtn.offsetHeight || 32) / 2) + "px";
     }
 

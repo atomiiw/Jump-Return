@@ -154,6 +154,7 @@ html[class*="dark"] {
   position: absolute;
   z-index: 99;
   width: min(360px, calc(100vw - 32px));
+  max-width: 720px;
   background: var(--jr-bg);
   border: 1px solid var(--jr-border);
   box-shadow: var(--jr-shadow);
@@ -271,6 +272,8 @@ html[class*="dark"] {
   padding: 10px 10px 10px 32px;
   position: relative;
   color: var(--jr-text);
+  max-height: calc(1.5em * 6 + 20px); /* ~6 lines + padding */
+  overflow-y: auto;
 }
 
 .jr-popup-highlight-inner::before {
@@ -481,6 +484,30 @@ ol.jr-popup-context-list .jr-depth-2 { list-style-type: lower-roman; }
   min-height: 48px;
 }
 
+/* Retry button inside timeout loading div */
+.jr-retry-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 12px auto 0;
+  padding: 6px;
+  border: none;
+  background: none;
+  color: var(--jr-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.jr-retry-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.jr-retry-btn:hover {
+  color: var(--jr-action);
+  transform: scale(1.25);
+}
+
 /* ==========================================================================
    Question row
    ========================================================================== */
@@ -533,12 +560,37 @@ ol.jr-popup-context-list .jr-depth-2 { list-style-type: lower-roman; }
   transition: border-color 0.15s ease;
 }
 
-.jr-popup-question-text:hover,
 .jr-popup-question--editing .jr-popup-question-text,
 .jr-popup-question-text:focus {
   border-bottom-color: var(--jr-action);
   outline: none;
   cursor: text;
+}
+
+/* Hover turns underline blue — but not during generation */
+.jr-popup:not(.jr-popup--generating) .jr-popup-question-text:hover {
+  border-bottom-color: var(--jr-action);
+  cursor: text;
+}
+
+/* --- Generating state: single class on .jr-popup disables all interaction --- */
+.jr-popup--generating .jr-popup-question-text {
+  cursor: default;
+  pointer-events: none;
+}
+
+.jr-popup--generating .jr-popup-edit-btn {
+  display: none;
+}
+
+.jr-popup--generating .jr-popup-version-prev,
+.jr-popup--generating .jr-popup-version-next {
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.jr-popup--generating .jr-edit-send-wrapper {
+  display: none;
 }
 
 .jr-popup-question-controls {
@@ -671,7 +723,7 @@ ol.jr-popup-context-list .jr-depth-2 { list-style-type: lower-roman; }
   padding: 14px;
   border-top: 1px solid var(--jr-border);
   border-radius: 0 0 calc(var(--jr-radius) - 1px) calc(var(--jr-radius) - 1px);
-  max-height: min(350px, 50vh);
+  max-height: min(400px, 50vh);
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: none;
@@ -839,20 +891,22 @@ ol.jr-popup-context-list .jr-depth-2 { list-style-type: lower-roman; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 8px 14px;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: calc(var(--jr-radius) - 1px);
 }
 
 .jr-popup-confirm-text {
   font-size: 14px;
   font-weight: 400;
-  color: var(--jr-text);
+  color: var(--jr-text-muted);
   line-height: 1.4;
   text-align: center;
-  margin-right: 6px;
+  margin-right: 8px;
 }
 
-.jr-popup-confirm-icon-btn { padding: 4px; }
+.jr-popup-confirm-icon-btn { padding: 5px; }
+.jr-popup-confirm-icon-btn svg { width: 14px; height: 14px; }
 .jr-popup-confirm-icon-btn:hover { color: var(--jr-action); transform: scale(1.3); }
 .jr-popup-confirm-icon-btn:active { transform: scale(1.35); }
 
@@ -1034,6 +1088,34 @@ html[class*="dark"] .jr-popup-confirm-icon-btn--danger:hover { color: #f87171; }
 /* ==========================================================================
    Reduced motion
    ========================================================================== */
+
+/* --- Scrollbars — uses --jr-border so it matches popup structure --- */
+.jr-popup-highlight-inner,
+.jr-popup-response {
+  scrollbar-width: thin;
+  scrollbar-color: var(--jr-highlight-border) transparent;
+}
+
+.jr-popup-highlight-inner::-webkit-scrollbar,
+.jr-popup-response::-webkit-scrollbar {
+  width: 3px;
+}
+
+.jr-popup-highlight-inner::-webkit-scrollbar-track,
+.jr-popup-response::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.jr-popup-highlight-inner::-webkit-scrollbar-thumb,
+.jr-popup-response::-webkit-scrollbar-thumb {
+  background: var(--jr-highlight-border);
+  border-radius: 1.5px;
+}
+
+.jr-popup-highlight-inner::-webkit-scrollbar-thumb:hover,
+.jr-popup-response::-webkit-scrollbar-thumb:hover {
+  background: var(--jr-text-muted);
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

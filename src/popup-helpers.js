@@ -3,6 +3,39 @@
   "use strict";
 
   var st = JR.state;
+  var NAV_WIDGET_GAP = 12; // px gap between popup right edge and nav widget
+
+  /** Max right edge (in viewport px) a popup may reach. */
+  function getPopupMaxRight() {
+    if (st.navWidget && st.navWidget.isConnected) {
+      return st.navWidget.getBoundingClientRect().left - NAV_WIDGET_GAP;
+    }
+    return window.innerWidth - 8;
+  }
+  JR.getPopupMaxRight = getPopupMaxRight;
+
+  /** Min left edge (in viewport px) a popup may reach. */
+  function getPopupMinLeft() {
+    // Use the chat column's left edge — it shifts automatically
+    // when the sidebar expands/collapses
+    var chatCol = document.querySelector('[class*="react-scroll-to-bottom"]')
+      || document.querySelector('main');
+    if (chatCol) {
+      var cr = chatCol.getBoundingClientRect();
+      if (cr.left > 0) return cr.left + 20;
+    }
+    return 8;
+  }
+  JR.getPopupMinLeft = getPopupMinLeft;
+
+  /** Clamp a popup left position (container-relative) within sidebar and nav widget boundaries. */
+  function clampPopupLeft(left, popupW, containerRect, containerW) {
+    var minLeftVp = getPopupMinLeft();
+    var maxRightVp = getPopupMaxRight();
+    var minLeft = minLeftVp - containerRect.left;
+    var maxLeft = maxRightVp - containerRect.left - popupW;
+    return Math.max(minLeft, Math.min(left, containerW - popupW - 8, maxLeft));
+  }
 
   JR.createLoadingDiv = function () {
     var div = document.createElement("div");
@@ -396,7 +429,7 @@
     }
 
     var containerW = contentContainer.clientWidth;
-    left = Math.max(8, Math.min(left, containerW - popupW - 8));
+    left = clampPopupLeft(left, popupW, containerRect, containerW);
 
     popup.style.left = left + "px";
     popup.style.top = top + "px";
@@ -479,7 +512,7 @@
       var centerRect = adjRect || rect;
       var left = centerRect.left - containerRect.left + centerRect.width / 2 - popup.offsetWidth / 2;
       var containerW = contentContainer.clientWidth;
-      left = Math.max(8, Math.min(left, containerW - popup.offsetWidth - 8));
+      left = clampPopupLeft(left, popup.offsetWidth, containerRect, containerW);
 
       var top;
       if (newDirection === "above") {
@@ -522,7 +555,7 @@
       top = rect.bottom - containerRect.top + gap;
     }
     var containerW = contentContainer.clientWidth;
-    left = Math.max(8, Math.min(left, containerW - popupW - 8));
+    left = clampPopupLeft(left, popupW, containerRect, containerW);
     st.activePopup.style.left = left + "px";
     st.activePopup.style.top = top + "px";
     st.activePopup._jrDirection = direction;
@@ -538,6 +571,7 @@
   JR.addResizeHandlers = function (popup) {
     var EDGE_ZONE = 6;
     var MIN_WIDTH = 280;
+    var MAX_WIDTH = 720;
 
     function getEdge(e) {
       var rect = popup.getBoundingClientRect();
@@ -606,9 +640,17 @@
           if (newRight < arrowX + 21) newRight = arrowX + 21;
         }
 
-        var maxWidth = window.innerWidth - 32;
+        // Clamp edges to sidebar and nav widget boundaries
+        var pRect = popup.parentElement ? popup.parentElement.getBoundingClientRect() : { left: 0 };
+        var minLeftVp = getPopupMinLeft();
+        var maxRightVp = getPopupMaxRight();
+        var minLeft = minLeftVp - pRect.left;
+        var maxRight = maxRightVp - pRect.left;
+        if (newLeft < minLeft) newLeft = minLeft;
+        if (newRight > maxRight) newRight = maxRight;
+
         var newWidth = newRight - newLeft;
-        newWidth = Math.max(MIN_WIDTH, Math.min(newWidth, maxWidth));
+        newWidth = Math.max(MIN_WIDTH, Math.min(newWidth, MAX_WIDTH));
         // Re-derive left from the clamped width depending on which edge is being dragged
         if (edge === "left") {
           newLeft = newRight - newWidth;
@@ -1016,12 +1058,14 @@
    */
   JR.removeAllPopups = function () {
     st.confirmingDelete = false;
+    if (JR.removeTriggerBtn) JR.removeTriggerBtn();
     while (st.activePopup || st.popupStack.length > 0) {
       JR.removePopup();
     }
   };
 
   function detachPopupState() {
+    if (JR.removeTriggerBtn) JR.removeTriggerBtn();
     if (st.cancelResponseWatch) st.cancelResponseWatch(true);
     st.activeSourceHighlights = [];
     if (st.resizeHandler) {
