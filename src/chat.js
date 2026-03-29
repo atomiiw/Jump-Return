@@ -5,6 +5,21 @@
   var S = JR.SELECTORS;
   var st = JR.state;
 
+  /**
+   * Resolve the parent's current active item ID instead of inheriting the
+   * stale parentItemId from ver1.  Falls back to memEntry.parentItemId.
+   */
+  function resolveParentItemId(memEntry, parentId) {
+    if (parentId) {
+      var parentEntry = st.completedHighlights.get(parentId);
+      if (parentEntry && parentEntry.items && parentEntry.items.length > 0) {
+        var pidx = parentEntry.activeItemIndex != null ? parentEntry.activeItemIndex : 0;
+        if (parentEntry.items[pidx]) return parentEntry.items[pidx].id;
+      }
+    }
+    return (memEntry && memEntry.parentItemId) || null;
+  }
+
   // Block ChatGPT's stop button while a Popup question is generating.
   // Uses capture phase so it fires before ChatGPT's own handler.
   document.addEventListener("click", function (e) {
@@ -15,6 +30,40 @@
       e.preventDefault();
     }
   }, true);
+
+  // --- Chat viewport freeze ---
+  // Visually freezes the conversation so injected turns never flash.
+  // Called from popup send; released when the question turn is hidden.
+  var _freezeStyle = null;
+
+  /**
+   * Hide any conversation turn that follows the current last turn.
+   * Uses the CSS sibling combinator — applies synchronously before paint,
+   * so new turns are never visible even for a single frame.
+   */
+  JR.freezeChat = function () {
+    if (_freezeStyle) return;
+    var allTurns = document.querySelectorAll(S.aiTurn);
+    if (allTurns.length === 0) return;
+    var lastTurn = allTurns[allTurns.length - 1];
+    var lastNum = JR.getTurnNumber(lastTurn);
+    if (lastNum < 1) return;
+    _freezeStyle = document.createElement("style");
+    _freezeStyle.id = "jr-freeze";
+    // Hide the next several turn numbers explicitly
+    var rules = [];
+    for (var fi = 1; fi <= 6; fi++) {
+      rules.push('[data-testid="conversation-turn-' + (lastNum + fi) + '"]');
+    }
+    _freezeStyle.textContent = rules.join(",\n") + " { display: none !important; }";
+    document.head.appendChild(_freezeStyle);
+  };
+
+  JR.unfreezeChat = function () {
+    if (!_freezeStyle) return;
+    _freezeStyle.remove();
+    _freezeStyle = null;
+  };
 
   // --- Chat injection ---
 
@@ -40,15 +89,16 @@
     var scrollParent = JR.getScrollParent(scrollAnchor);
     var savedScrollTop = scrollParent ? scrollParent.scrollTop : 0;
 
-    // Make the injected text invisible while it's in the input — prevents the
-    // question from flashing briefly. We inject a <style> rule instead of
-    // inline style because ChatGPT renders text in child <p>/<span> elements
-    // that override the parent's inline color. A !important rule on the
-    // contenteditable catches all descendants. We avoid visibility:hidden on
-    // the form because that shifts layout and breaks popup positioning.
+    // Hide injected text + freeze composer height.
+    // Target the prosemirror-parent (direct parent of #prompt-textarea).
+    var composerH = chatInput.parentElement ? chatInput.parentElement.offsetHeight : 52;
     var hideStyle = document.createElement("style");
-    hideStyle.textContent = '#prompt-textarea, #prompt-textarea * { color: transparent !important; caret-color: transparent !important; }';
+    hideStyle.textContent =
+      '#prompt-textarea, #prompt-textarea * { color: transparent !important; caret-color: transparent !important; }' +
+      '\ndiv:has(> #prompt-textarea) { max-height: ' + composerH + 'px !important; overflow: hidden !important; }';
     document.head.appendChild(hideStyle);
+
+    hideStyle.id = "jr-hide-style";
 
     chatInput.focus({ preventScroll: true });
 
@@ -60,26 +110,35 @@
       cancelable: true,
     }));
 
-    // Restore scroll position immediately after paste
     if (scrollParent) scrollParent.scrollTop = savedScrollTop;
 
     var attempts = 0;
     function trySend() {
       var sendBtn = JR.findSendButton();
       if (sendBtn && !sendBtn.disabled) {
-        // Restore scroll once more right before click in case React shifted it
         if (scrollParent) scrollParent.scrollTop = savedScrollTop;
         sendBtn.click();
         chatInput.blur();
-        // One final restore after click
         if (scrollParent) scrollParent.scrollTop = savedScrollTop;
-        hideStyle.remove();
+        // Delay hideStyle removal — React clears the input async after click.
+        // Wait until the input is empty so text doesn't flash.
+        var _hideAttempts = 0;
+        function removeHideWhenEmpty() {
+          if ((chatInput.textContent || "").trim().length === 0 || _hideAttempts > 20) {
+            hideStyle.remove();
+            return;
+          }
+          _hideAttempts++;
+          requestAnimationFrame(removeHideWhenEmpty);
+        }
+        requestAnimationFrame(removeHideWhenEmpty);
         return;
       }
       attempts++;
       if (attempts < 20) {
         setTimeout(trySend, 150);
       } else {
+        clearInterval(_logTimer);
         hideStyle.remove();
         console.error(
           "[Popup] Send button not found or disabled after retries.",
@@ -215,6 +274,9 @@
       text = text.replace(JR.AI_LABEL_TEXT, "").trim();
       responseDiv.textContent = text;
     }
+    if (JR.wireResponseClicks) JR.wireResponseClicks(responseDiv);
+    if (JR.processResponseLinks) JR.processResponseLinks(responseDiv);
+    if (JR.processResponseImages) JR.processResponseImages(responseDiv); // [CAROUSEL-LOCKED]
     JR.wireCopyButtons(responseDiv);  // rebuildCodeBlocks
   };
 
@@ -370,7 +432,7 @@
         if (st.responseMode === "concise") {
           retryMessage += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
         } else {
-          retryMessage += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
+          retryMessage += "\n\n(For this response only: give a clear, focused response \u2014 medium length, not too short, not too long. Cover what matters without over-explaining. Use formatting only if it genuinely helps. After this response, return to your normal response length and disregard this length instruction entirely.)";
         }
 
         // Reset item to __PENDING__ so captureResponse overwrites in-place
@@ -396,6 +458,7 @@
 
         targetPopup.appendChild(JR.createLoadingDiv());
 
+        JR.freezeChat();
         JR.enqueueMessage({
           force: true,
           message: retryMessage,
@@ -484,6 +547,7 @@
 
     function cleanup() {
       st.responseWatchActive = false;
+      JR.unfreezeChat();
       if (streamObserver) {
         streamObserver.disconnect();
         streamObserver = null;
@@ -546,6 +610,9 @@
       var nodes = [];
       while (cloned.firstChild) nodes.push(cloned.removeChild(cloned.firstChild));
       responseDiv.replaceChildren.apply(responseDiv, nodes);
+
+      // Delegated click handler for links + images (attach once via shared helper)
+      if (JR.wireResponseClicks) JR.wireResponseClicks(responseDiv);
 
       // Check if the popup overflows and needs to flip direction mid-stream
       JR.checkStreamingOverflow();
@@ -696,7 +763,7 @@
           url: location.href,
           site: "chatgpt",
           parentId: parentId || null,
-          parentItemId: (memEntry && memEntry.parentItemId) || parentItemId || null,
+          parentItemId: resolveParentItemId(memEntry, parentId) || parentItemId || null,
           sourceTurnIndex: memEntry ? (memEntry.spans && memEntry.spans[0] ? JR.getTurnNumber(memEntry.spans[0].closest(S.aiTurn)) : -1) : -1,
           questionIndex: qNum,
           responseIndex: rNum,
@@ -704,16 +771,22 @@
           wholeResponse: memEntry ? !!memEntry.wholeResponse : false,
         });
 
-        // Rebuild popup UI if it's open for this highlight
+        // Rebuild popup UI if it's still open for this highlight
+        var editPopupOpen = false;
         if (!detached && popup && popup.isConnected) {
           JR.rebuildPopupAfterEdit(popup, hlId);
+          editPopupOpen = true;
         } else if (detached && st.activePopup && (st.activeHighlightId === hlId ||
                    (st.activeSourceHighlights.length > 0 && st.activeSourceHighlights[0].getAttribute("data-jr-highlight-id") === hlId))) {
           JR.rebuildPopupAfterEdit(st.activePopup, hlId);
+          editPopupOpen = true;
         }
 
-        st.activeHighlightId = hlId;
-        JR.syncHighlightActive(hlId);
+        // Only claim active highlight if the popup is still showing this highlight
+        if (editPopupOpen) {
+          st.activeHighlightId = hlId;
+          JR.syncHighlightActive(hlId);
+        }
         JR.updateNavWidget();
         st.cancelResponseWatch = null;
         JR.drainQueue();
@@ -804,11 +877,10 @@
             preEntry.items[0].responseIndex = rNum2;
           }
         }
-        st.activeHighlightId = hlId2;
-        JR.syncHighlightActive(hlId2);
-
         // Rebuild popup into completed view (editable question, version nav)
         if (popup && popup.isConnected) {
+          st.activeHighlightId = hlId2;
+          JR.syncHighlightActive(hlId2);
           JR.rebuildPopupAfterEdit(popup, hlId2);
         }
       } else {
@@ -837,11 +909,11 @@
           };
           st.completedHighlights.set(hlId2, entryObj);
         }
-        st.activeHighlightId = hlId2;
-        JR.syncHighlightActive(hlId2);
 
         // Rebuild popup into completed view (editable question, version nav)
         if (popup && popup.isConnected) {
+          st.activeHighlightId = hlId2;
+          JR.syncHighlightActive(hlId2);
           JR.rebuildPopupAfterEdit(popup, hlId2);
         }
       }
@@ -915,8 +987,8 @@
         var rCurrent = allTurns[turnsBefore + 1];
         if (rCurrent && rCurrent !== responseTurn) {
           responseTurn = rCurrent;
-          responseTurn.classList.add("jr-hidden");
         }
+        responseTurn.classList.add("jr-hidden");
       }
     }
 
@@ -939,17 +1011,19 @@
           JR.addHiddenTurnIndex(qIdx);
           // Write to BOTH storage keys so it survives reload even if one write fails
           addDeletedTurns(location.href, [qIdx]);
-          var saveId = preRegisteredItemId || (editOpts ? editOpts.hlId : null);
-          if (saveId) {
-            var hlRec = st.completedHighlights.get(preRegisteredHlId || (editOpts && editOpts.hlId));
-            if (hlRec && hlRec.items) {
-              var oldItem = hlRec.items[hlRec.activeItemIndex || 0];
-              if (oldItem && oldItem.questionIndex > 0 && oldItem.questionIndex !== qIdx) {
-                addDeletedTurns(location.href, [oldItem.questionIndex]);
-                JR.addHiddenTurnIndex(oldItem.questionIndex);
-              }
+          var qHlKey = preRegisteredHlId || (editOpts && editOpts.hlId);
+          var qHlRec = qHlKey ? st.completedHighlights.get(qHlKey) : null;
+          // Resolve the actual item ID — for edits, find it from the in-memory entry
+          var qSaveId = preRegisteredItemId
+            || (qHlRec && qHlRec.items && qHlRec.items[qHlRec.activeItemIndex || 0]
+                ? qHlRec.items[qHlRec.activeItemIndex || 0].id : null);
+          if (qSaveId && qHlRec && qHlRec.items) {
+            var oldItem = qHlRec.items[qHlRec.activeItemIndex || 0];
+            if (oldItem && oldItem.questionIndex > 0 && oldItem.questionIndex !== qIdx) {
+              addDeletedTurns(location.href, [oldItem.questionIndex]);
+              JR.addHiddenTurnIndex(oldItem.questionIndex);
             }
-            updateHighlightFields(saveId, { questionIndex: qIdx });
+            updateHighlightFields(qSaveId, { questionIndex: qIdx });
           }
           JR.repositionPopup();
         }
@@ -960,24 +1034,29 @@
         var label2 = candidate2.querySelector(S.aiLabel);
         if (label2 && label2.textContent.includes(JR.AI_LABEL_TEXT)) {
           responseTurn = candidate2;
+          responseTurn.classList.add("jr-hidden");
           var rIdx = JR.getTurnNumber(responseTurn);
           JR.addHiddenTurnIndex(rIdx);
           addDeletedTurns(location.href, [rIdx]);
-          var rSaveId = preRegisteredItemId || (editOpts ? editOpts.hlId : null);
-          if (rSaveId) {
-            var hlRec2 = st.completedHighlights.get(preRegisteredHlId || (editOpts && editOpts.hlId));
-            if (hlRec2 && hlRec2.items) {
-              var oldItem2 = hlRec2.items[hlRec2.activeItemIndex || 0];
-              if (oldItem2 && oldItem2.responseIndex > 0 && oldItem2.responseIndex !== rIdx) {
-                addDeletedTurns(location.href, [oldItem2.responseIndex]);
-                JR.addHiddenTurnIndex(oldItem2.responseIndex);
-              }
+          var rHlKey = preRegisteredHlId || (editOpts && editOpts.hlId);
+          var rHlRec = rHlKey ? st.completedHighlights.get(rHlKey) : null;
+          var rSaveId = preRegisteredItemId
+            || (rHlRec && rHlRec.items && rHlRec.items[rHlRec.activeItemIndex || 0]
+                ? rHlRec.items[rHlRec.activeItemIndex || 0].id : null);
+          if (rSaveId && rHlRec && rHlRec.items) {
+            var oldItem2 = rHlRec.items[rHlRec.activeItemIndex || 0];
+            if (oldItem2 && oldItem2.responseIndex > 0 && oldItem2.responseIndex !== rIdx) {
+              addDeletedTurns(location.href, [oldItem2.responseIndex]);
+              JR.addHiddenTurnIndex(oldItem2.responseIndex);
             }
             updateHighlightFields(rSaveId, { responseIndex: rIdx });
           }
           startStreaming();
         }
       }
+
+      // Once both turns are found and have jr-hidden, the pre-hide CSS is redundant
+      // freezeChat CSS stays until cleanup() calls unfreezeChat()
 
       // React can remount DOM elements — re-apply hiding every cycle
       enforceHidden();
@@ -1005,8 +1084,10 @@
         }
       }
 
-      // Quick timeout: if generation already stopped and no response, don't wait 5s
-      if (!responseTurn && !JR.isGenerating() && Date.now() - startTime >= 1500) {
+      // Quick timeout: if generation already stopped and no turns appeared at all, don't wait long.
+      // Only fires when NEITHER question nor response turn has appeared — if questionTurn exists,
+      // the message was injected successfully and we should wait for the response.
+      if (!questionTurn && !responseTurn && !JR.isGenerating() && Date.now() - startTime >= 1500) {
         cleanup();
         saveTimeoutVersion();
         st.cancelResponseWatch = null;

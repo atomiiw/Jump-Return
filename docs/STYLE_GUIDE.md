@@ -25,12 +25,13 @@ Defined on `:root` and overridden for dark mode.
 | `--jr-action-hover` | `#1539cc` | `#7b95f9` | Hover state for action-colored elements |
 | `--jr-highlight-bg` | `#edebeb` | `#232630` | Blockquote background, code bg fallback |
 | `--jr-highlight-border` | `#d7d5d5` | `#383b45` | Blockquote borders, question underline |
+| `--jr-separator` | `#a3a2a2` | `#656570` | Search bar count separator |
 | `--jr-radius` | `8px` | `8px` | Border radius for cards, popups, dropdowns |
 | `--jr-radius-pill` | `12px` | `12px` | Border radius for pill shapes (search bar base) |
 | `--jr-mark-bg` | `#1944f1` | `#1944f1` | Highlight color on page text (white text on blue) |
 | `--jr-mark-bg-hover` | `#1539cc` | `#3d5ef3` | Highlight hover (darker in light, lighter in dark) |
 | `--jr-mark-bg-active` | `#112fa8` | `#1539cc` | Highlight active (popup open) |
-| `--jr-shadow` | `0 4px 16px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06)` | `0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.2)` | Two-layer elevation shadow |
+| `--jr-shadow` | `0 2px 8px rgba(0,0,0,0.12), 0 0.5px 4px rgba(0,0,0,0.06)` | `0 2px 8px rgba(0,0,0,0.4), 0 0.5px 4px rgba(0,0,0,0.2)` | Two-layer elevation shadow |
 | `--jr-focus-ring` | `rgba(25,68,241,0.25)` | `rgba(90,122,247,0.35)` | Focus-visible outline glow |
 | `--jr-link` | `#1944f1` | `#5a7af7` | Link color in response text |
 | `--jr-font` | system stack | system stack | Font family |
@@ -75,11 +76,12 @@ All hover transitions use `0.15s ease`. Press/active states use `scale(1.35)` fo
 - Trash button: floats at `top: -14px; right: -14px` of popup
 
 ### `.jr-popup`
-- `position: absolute`, `z-index: 99`
-- `min(360px, calc(100vw - 32px))` wide, `border-radius: var(--jr-radius)` (8px)
-- `1px solid var(--jr-border)`, `background: var(--jr-bg)`, `box-shadow: var(--jr-shadow)`
+- `position: absolute`, `z-index: 99`, `display: flex; flex-direction: column`
+- `min(360px, calc(100vw - 32px))` wide, `max-height: min(520px, 70vh)`
+- `border-radius: var(--jr-radius)` (4px), `box-shadow: 0 0 0 1px border + elevation`
 - Fade-in animation (`jr-fade-in`, 0.15s ease-out)
 - Only `left`, `top`, and `width` are set via JS
+- Height caps: quote scrolls at 6 lines, question scrolls at 4 lines, response fills remaining space and scrolls
 
 ### `.jr-popup-arrow`
 - 18px wide, 9px tall CSS triangle

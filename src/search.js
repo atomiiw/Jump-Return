@@ -593,7 +593,10 @@
     var query = searchInput ? searchInput.value.trim() : "";
     clearMarks();
 
-    if (!query || query.length < 2) {
+    // CJK characters are meaningful at 1 char; Latin/etc. need at least 2
+    var hasCJK = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/.test(query);
+    var minLen = hasCJK ? 1 : 2;
+    if (!query || query.length < minLen) {
       matches = [];
       matchIndex = -1;
       updateCounter();
@@ -717,8 +720,8 @@
     searchInput = document.createElement("input");
     searchInput.type = "text";
     searchInput.className = "jr-search-input";
-    searchInput.placeholder = "Search this page\u2026";
-    searchInput.setAttribute("aria-label", "Search highlights");
+    searchInput.placeholder = "Search responses\u2026";
+    searchInput.setAttribute("aria-label", "Search responses");
     searchBar.appendChild(searchInput);
 
     // Match counter
@@ -726,6 +729,11 @@
     searchCount.className = "jr-search-count";
     searchCount.textContent = "";
     searchBar.appendChild(searchCount);
+
+    // Separator between count and nav buttons
+    var searchSep = document.createElement("span");
+    searchSep.className = "jr-search-sep";
+    searchBar.appendChild(searchSep);
 
     // Prev button (up caret)
     prevBtn = document.createElement("button");

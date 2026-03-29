@@ -177,6 +177,388 @@
     }
   }
 
+  /**
+   * Delegated click handler for links and images inside a response div.
+   * Handles <a> tags (including those with dead React handlers), <button>
+   * wrappers around images, and standalone <img> elements.
+   */
+  // ChatGPT entity selector: spans with cursor-pointer that act as sidebar links
+  var ENTITY_SELECTOR = "span.cursor-pointer[class*='entity-underline'], span.cursor-pointer[class*='entity-accent']";
+
+  function wireResponseClicks(responseDiv) {
+    if (responseDiv._jrClickWired) return;
+    responseDiv._jrClickWired = true;
+    responseDiv.addEventListener("click", function (e) {
+      // --- ChatGPT entity spans (sidebar links) ---
+      // These are <span class="...entity-underline...cursor-pointer..."> with React handlers.
+      // Proxy the click to the matching element in the original hidden turn.
+      var entitySpan = e.target.closest(ENTITY_SELECTOR);
+      if (entitySpan && responseDiv.contains(entitySpan)) {
+        e.preventDefault();
+        e.stopPropagation();
+        proxyClickToHiddenTurn(entitySpan, responseDiv);
+        return;
+      }
+
+      // --- Regular <a> links ---
+      var a = e.target.closest("a");
+      if (a && responseDiv.contains(a)) {
+        var href = a.getAttribute("href") || a.dataset.href || a.href || "";
+        if (href === window.location.href || href === window.location.href + "#") href = "";
+        if (href && href !== "#" && href.indexOf("javascript:") !== 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.open(href, "_blank", "noopener,noreferrer");
+          return;
+        }
+      }
+
+      // --- ChatGPT buttons (citations, etc.) — proxy to hidden turn ---
+      var btn = e.target.closest("button");
+      if (btn && responseDiv.contains(btn) && !btn.closest(".jr-code-block")
+          && !btn.classList.contains("jr-reply-whole-btn")
+          && !btn._jrReplyAnchor) {
+        var btnImg = btn.querySelector("img");
+        if (btnImg && btnImg.src) {
+          e.stopPropagation();
+          openLightbox(responseDiv, [btnImg.src], 0);
+          return;
+        }
+        // Non-image button — proxy click to hidden turn
+        e.preventDefault();
+        e.stopPropagation();
+        proxyClickToHiddenTurn(btn, responseDiv);
+        return;
+      }
+
+      // --- Lightbox images ---
+      var img = e.target.closest("img");
+      if (img && img.src) {
+        if (img.closest(".jr-gallery")) return;
+        e.stopPropagation();
+        openLightbox(responseDiv, [img.src], 0);
+        return;
+      }
+    });
+  }
+
+  /**
+   * Find the matching element in the original hidden response turn and click it,
+   * triggering ChatGPT's React handlers (e.g., open sidebar panel).
+   */
+  function proxyClickToHiddenTurn(popupEl, responseDiv) {
+    // Find the highlight ID for this popup
+    var popup = responseDiv.closest(".jr-popup");
+    if (!popup) return;
+    var hlId = popup._jrHighlightId || st.activeHighlightId;
+    if (!hlId) return;
+    var entry = st.completedHighlights.get(hlId);
+    if (!entry) return;
+
+    // Get the response turn index from the active version
+    var activeItem = (entry.items && entry.items.length > 0)
+      ? entry.items[entry.activeItemIndex || 0]
+      : null;
+    var turnIndex = activeItem ? activeItem.responseIndex : entry.responseIndex;
+    if (turnIndex == null) return;
+
+    // Find the hidden turn in the DOM
+    var turns = document.querySelectorAll(JR.SELECTORS.aiTurn);
+    var hiddenTurn = null;
+    for (var t = 0; t < turns.length; t++) {
+      if (JR.getTurnNumber(turns[t]) === turnIndex) {
+        hiddenTurn = turns[t];
+        break;
+      }
+    }
+    if (!hiddenTurn) return;
+
+    var markdown = hiddenTurn.querySelector(JR.SELECTORS.responseContent);
+    if (!markdown) return;
+
+    // Match by text content and tag + class
+    var matchText = (popupEl.textContent || "").trim();
+    var matchTag = popupEl.tagName.toLowerCase();
+
+    // Try entity spans first
+    var candidates = markdown.querySelectorAll(ENTITY_SELECTOR);
+    for (var c = 0; c < candidates.length; c++) {
+      if ((candidates[c].textContent || "").trim() === matchText) {
+        candidates[c].click();
+        return;
+      }
+    }
+
+    // Try buttons
+    if (matchTag === "button") {
+      var btnCandidates = markdown.querySelectorAll("button");
+      for (var b = 0; b < btnCandidates.length; b++) {
+        if ((btnCandidates[b].textContent || "").trim() === matchText) {
+          btnCandidates[b].click();
+          return;
+        }
+      }
+    }
+
+    // Fallback: find any element with same tag, class substring, and text
+    var allSame = markdown.querySelectorAll(matchTag);
+    for (var f = 0; f < allSame.length; f++) {
+      if ((allSame[f].textContent || "").trim() === matchText
+          && allSame[f].className === popupEl.className) {
+        allSame[f].click();
+        return;
+      }
+    }
+  }
+
+  /**
+   * Post-process cloned links: ensure all <a> tags have target, rel,
+   * cursor, and proper href. Remove dead ChatGPT buttons that lost handlers.
+   */
+  function processResponseLinks(responseDiv) {
+    var links = responseDiv.querySelectorAll("a");
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var href = a.getAttribute("href") || "";
+      // If no href, check if the link text itself is a URL
+      if (!href || href === "#") {
+        var text = (a.textContent || "").trim();
+        if (/^https?:\/\//i.test(text)) {
+          a.setAttribute("href", text);
+          href = text;
+        }
+      }
+      // Ensure links open in new tab
+      if (href && href !== "#") {
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+  }
+
+  /**
+   * Detect image containers in cloned response HTML, make all images
+   * visible (overriding ChatGPT's overflow/carousel CSS), and build
+   * a clickable gallery with lightbox navigation.
+   *
+   * [CAROUSEL-LOCKED] — All carousel/gallery/lightbox code below through
+   * openLightbox() is finalized. Do not modify without explicit permission.
+   */
+  function isContentImage(img) { // [CAROUSEL-LOCKED]
+    // Skip images inside anchor tags that also contain text (favicons/icons)
+    var parentA = img.closest("a");
+    if (parentA && (parentA.textContent || "").trim().length > 0) return false;
+    // Skip explicitly tiny images
+    var w = img.naturalWidth || img.width || parseInt(img.getAttribute("width")) || 0;
+    var h = img.naturalHeight || img.height || parseInt(img.getAttribute("height")) || 0;
+    if ((w > 0 && w < 48) || (h > 0 && h < 48)) return false;
+    // Skip SVG data URIs (usually icons)
+    var src = img.src || "";
+    if (src.indexOf("data:image/svg") === 0) return false;
+    return true;
+  }
+
+  var GALLERY_VISIBLE = 3; // [CAROUSEL-LOCKED] show 3 thumbnails, like ChatGPT
+
+  function processResponseImages(responseDiv) { // [CAROUSEL-LOCKED]
+    var allImgs = responseDiv.querySelectorAll("img");
+    if (!allImgs.length) return;
+
+    // Filter to content images only
+    var contentImgs = [];
+    var seenSrc = {};
+    for (var i = 0; i < allImgs.length; i++) {
+      var src = allImgs[i].src || allImgs[i].dataset.src || "";
+      if (!src || !isContentImage(allImgs[i])) continue;
+      if (!seenSrc[src]) {
+        seenSrc[src] = true;
+        contentImgs.push(allImgs[i]);
+      }
+    }
+
+    if (contentImgs.length < 2) return;
+
+    // Group images by their nearest shared container.
+    // Two images belong to the same group if their LCA is NOT responseDiv.
+    var groups = []; // each: { container: Element, imgs: [img], srcs: [string] }
+
+    for (var ci = 0; ci < contentImgs.length; ci++) {
+      var img = contentImgs[ci];
+      var src = img.src || img.dataset.src;
+      var placed = false;
+      for (var g = 0; g < groups.length; g++) {
+        var lca = findLCA(groups[g].imgs[0], img, responseDiv);
+        if (lca && lca !== responseDiv) {
+          groups[g].container = lca;
+          groups[g].imgs.push(img);
+          groups[g].srcs.push(src);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        groups.push({ container: null, imgs: [img], srcs: [src] });
+      }
+    }
+
+    // Process each group with 2+ images
+    for (var gi = 0; gi < groups.length; gi++) {
+      var group = groups[gi];
+      if (group.imgs.length < 2) continue;
+
+      // Re-derive the container as the LCA of first two images in the group
+      var galleryParent = findLCA(group.imgs[0], group.imgs[1], responseDiv);
+      if (!galleryParent || galleryParent === responseDiv) continue;
+
+      // Only replace if the container looks like a pure image grid (minimal text)
+      var containerText = (galleryParent.textContent || "").replace(/\s+/g, "").trim();
+      if (containerText.length > 50) continue;
+
+      buildGallery(responseDiv, galleryParent, group.srcs);
+    }
+  }
+
+  /**
+   * Find lowest common ancestor of two nodes, stopping at stopAt.  [CAROUSEL-LOCKED]
+   */
+  function findLCA(a, b, stopAt) { // [CAROUSEL-LOCKED]
+    var ancestors = new Set();
+    var node = a;
+    while (node && node !== stopAt) { ancestors.add(node); node = node.parentElement; }
+    node = b;
+    while (node && node !== stopAt) {
+      if (ancestors.has(node)) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * Replace a gallery container with a collapsed 3-thumb gallery + lightbox.  [CAROUSEL-LOCKED]
+   */
+  function buildGallery(responseDiv, galleryParent, allSrcs) {
+    var gallery = document.createElement("div");
+    gallery.className = "jr-gallery";
+
+    var showCount = Math.min(allSrcs.length, GALLERY_VISIBLE);
+    var extra = allSrcs.length - showCount;
+
+    for (var gi = 0; gi < showCount; gi++) {
+      var thumb = document.createElement("div");
+      thumb.className = "jr-gallery-thumb";
+      thumb.dataset.index = gi;
+      var imgEl = document.createElement("img");
+      imgEl.src = allSrcs[gi];
+      imgEl.loading = "lazy";
+      thumb.appendChild(imgEl);
+      if (gi === showCount - 1 && extra > 0) {
+        var badge = document.createElement("div");
+        badge.className = "jr-gallery-badge";
+        badge.textContent = "+" + extra;
+        thumb.appendChild(badge);
+      }
+      gallery.appendChild(thumb);
+    }
+
+    gallery.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var thumbEl = e.target.closest(".jr-gallery-thumb");
+      var startIdx = thumbEl ? (parseInt(thumbEl.dataset.index) || 0) : 0;
+      openLightbox(responseDiv, allSrcs, startIdx);
+    });
+
+    galleryParent.parentElement.insertBefore(gallery, galleryParent);
+    galleryParent.remove();
+  }
+
+  /**
+   * Open a lightbox overlay showing an image with left/right navigation.  [CAROUSEL-LOCKED]
+   */
+  function openLightbox(responseDiv, srcs, startIndex) { // [CAROUSEL-LOCKED]
+    // Remove existing lightbox if any
+    var existing = document.querySelector(".jr-lightbox");
+    if (existing) existing.remove();
+
+    var currentIdx = startIndex;
+
+    var overlay = document.createElement("div");
+    overlay.className = "jr-lightbox";
+
+    var img = document.createElement("img");
+    img.className = "jr-lightbox-img";
+    img.src = srcs[currentIdx];
+    overlay.appendChild(img);
+
+    // Navigation arrows (only if multiple images)
+    var prevBtn, nextBtn, counter;
+    if (srcs.length > 1) {
+      prevBtn = document.createElement("button");
+      prevBtn.className = "jr-lightbox-prev";
+      prevBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
+      overlay.appendChild(prevBtn);
+
+      nextBtn = document.createElement("button");
+      nextBtn.className = "jr-lightbox-next";
+      nextBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>';
+      overlay.appendChild(nextBtn);
+
+      counter = document.createElement("div");
+      counter.className = "jr-lightbox-counter";
+      overlay.appendChild(counter);
+    }
+
+    // Close button
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "jr-lightbox-close";
+    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    overlay.appendChild(closeBtn);
+
+    document.body.appendChild(overlay);
+
+    function update() {
+      img.src = srcs[currentIdx];
+      if (counter) counter.textContent = (currentIdx + 1) + " / " + srcs.length;
+      if (prevBtn) prevBtn.style.visibility = currentIdx === 0 ? "hidden" : "visible";
+      if (nextBtn) nextBtn.style.visibility = currentIdx === srcs.length - 1 ? "hidden" : "visible";
+    }
+    update();
+
+    function close() {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onBlock, true);
+    }
+
+    function onKey(e) {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      if (e.key === "ArrowLeft" && currentIdx > 0) { currentIdx--; update(); }
+      if (e.key === "ArrowRight" && currentIdx < srcs.length - 1) { currentIdx++; update(); }
+    }
+
+    // Block mousedown from reaching the popup's outside-click handler
+    function onBlock(e) {
+      if (overlay.isConnected) { e.stopPropagation(); e.stopImmediatePropagation(); }
+    }
+
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onBlock, true);
+    overlay.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (e.target === overlay) close();
+    });
+    closeBtn.addEventListener("click", function (e) { e.stopPropagation(); close(); });
+    if (prevBtn) prevBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (currentIdx > 0) { currentIdx--; update(); }
+    });
+    if (nextBtn) nextBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (currentIdx < srcs.length - 1) { currentIdx++; update(); }
+    });
+  }
+
   function resolveContentContainer(wrappers, isChained, entry) {
     if (entry) {
       // For chained highlights, spans live inside a parent popup's response div,
@@ -203,19 +585,34 @@
     return (anchorArticle ? anchorArticle.parentElement : null) || document.body;
   }
 
-  function attachResizeListener(popup, spans, contentContainer) {
+  function attachResizeListener(popup, spans, contentContainer) { // [LAYOUT-LOCKED]
     if (spans.length === 0) return;
     st.resizeHandler = function () {
       if (!spans[0].isConnected) return;
       var r = JR.getHighlightRect(spans);
       var cRect = contentContainer.getBoundingClientRect();
       var popupW = popup.offsetWidth;
+      var popupH = popup.offsetHeight;
       var cW = contentContainer.clientWidth;
+      var gap = 8;
+
+      // Update left
       var left = r.left - cRect.left + r.width / 2 - popupW / 2;
       var minLeft = JR.getPopupMinLeft() - cRect.left;
       var maxLeft = JR.getPopupMaxRight() - cRect.left - popupW;
       left = Math.max(minLeft, Math.min(left, cW - popupW - 8, maxLeft));
       popup.style.left = left + "px";
+
+      // Update top — highlight may have reflowed vertically
+      var dir = popup._jrLockedDirection || popup._jrDirection;
+      if (dir === "above") {
+        var top = r.top - cRect.top - popupH - gap;
+        popup.style.top = top + "px";
+        popup._jrBottomAnchor = top + popupH;
+      } else {
+        popup.style.top = (r.bottom - cRect.top + gap) + "px";
+      }
+
       JR.updateArrow(popup, r, cRect, left);
     };
     window.addEventListener("resize", st.resizeHandler);
@@ -310,6 +707,7 @@
       var question = questionText.textContent.trim();
       if (!question) return;
 
+      JR.freezeChat();
       st.responseMode = mode;
 
       var message;
@@ -334,7 +732,7 @@
       if (mode === "concise") {
         message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
       } else {
-        message += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
+        message += "\n\n(For this response only: give a clear, focused response \u2014 medium length, not too short, not too long. Cover what matters without over-explaining. Use formatting only if it genuinely helps. After this response, return to your normal response length and disregard this length instruction entirely.)";
       }
 
       questionDiv.remove();
@@ -810,6 +1208,7 @@
   var SEND_SVG = '<svg class="jr-icon-reg" viewBox="0 0 256 256" fill="currentColor"><path d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></svg><svg class="jr-icon-bold" viewBox="0 0 256 256" fill="currentColor"><path d="M224.49,136.49l-72,72a12,12,0,0,1-17-17L187,140H40a12,12,0,0,1,0-24H187L135.51,64.48a12,12,0,0,1,17-17l72,72A12,12,0,0,1,224.49,136.49Z"/></svg>';
 
   function submitEdit(popup, hlId, entry, contentContainer, newQuestion, mode) {
+    JR.freezeChat();
     // Exit edit mode, enter generating state
     popup.classList.add("jr-popup--generating");
     var questionDiv = popup.querySelector(".jr-popup-question");
@@ -845,7 +1244,7 @@
     if (editMode === "concise") {
       message += "\n\n(For this response only: please keep it brief \u2014 2-3 sentences. After this response, return to your normal response length and disregard the above brevity instruction entirely.)";
     } else {
-      message += "\n\n(For this response only: give a thorough, well-structured response \u2014 use headings, sub-points, and formatting where helpful \u2014 but stay focused on what\u2019s directly relevant. Cut filler and tangential areas. After this response, return to your normal response length and disregard this length instruction entirely.)";
+      message += "\n\n(For this response only: give a clear, focused response \u2014 medium length, not too short, not too long. Cover what matters without over-explaining. Use formatting only if it genuinely helps. After this response, return to your normal response length and disregard this length instruction entirely.)";
     }
 
     var waitOpts = {
@@ -866,7 +1265,7 @@
     });
   }
 
-  function showCompletedResponse(popup, upper, id, entry, contentContainer) {
+  function showCompletedResponse(popup, upper, id, entry, contentContainer, skipStorageSync) {
     // Always land on the last version
     if (entry.items && entry.items.length > 0) {
       var lastIdx = entry.items.length - 1;
@@ -879,7 +1278,11 @@
       }
       entry.question = lastItem.question;
       entry.responseHTML = lastItem.responseHTML;
-      setActiveItem(id, lastItem.id);
+      // Skip storage sync when called from rebuildPopupAfterEdit — saveHighlight
+      // already set the active item and a concurrent setActiveItem would race.
+      if (!skipStorageSync) {
+        setActiveItem(id, lastItem.id);
+      }
     }
 
     // Show the question with inline edit toggle
@@ -1158,6 +1561,7 @@
         popup.classList.add("jr-popup--generating");
         timeoutDiv.remove();
         popup.appendChild(JR.createLoadingDiv());
+        JR.freezeChat();
         JR.enqueueMessage({
           force: true,
           message: retryMessage,
@@ -1185,6 +1589,10 @@
     responseDiv.className = "jr-popup-response";
     if (html) responseDiv.innerHTML = html;
     popup.appendChild(responseDiv);
+
+    wireResponseClicks(responseDiv);
+    processResponseLinks(responseDiv);
+    processResponseImages(responseDiv);
     rebuildCodeBlocks(responseDiv);
     restoreChainedHighlights(responseDiv, hlId, contentContainer, activeItemId);
 
@@ -1256,6 +1664,9 @@
    *  - Completed: reopening a saved highlight      { completedId }
    */
   JR.wireCopyButtons = rebuildCodeBlocks;
+  JR.wireResponseClicks = wireResponseClicks;
+  JR.processResponseLinks = processResponseLinks;
+  JR.processResponseImages = processResponseImages; // [CAROUSEL-LOCKED]
 
   JR.createPopup = function (opts) {
     var completedId = opts.completedId || null;
@@ -1302,7 +1713,7 @@
 
     // --- Create popup element ---
     var popup = document.createElement("div");
-    popup.className = "jr-popup";
+    popup.className = "jr-popup" + (isChained ? " jr-popup--chained" : "");
     popup._jrChained = isChained;
     var w = isChained ? st.customPopupWidthChained : st.customPopupWidthL1;
     if (w) popup.style.width = w + "px";
@@ -1352,11 +1763,6 @@
 
     // --- Resolve content container ---
     var contentContainer = resolveContentContainer(wrappers, isChained, entry);
-    if (getComputedStyle(contentContainer).position === "static") {
-      contentContainer.style.position = "relative";
-    }
-    // Cap the stacking context so popup stays above code blocks but below ChatGPT's input bar
-    contentContainer.style.zIndex = "0";
     // Keep entry's contentContainer reference fresh
     if (entry) {
       entry.contentContainer = contentContainer;
@@ -1381,7 +1787,15 @@
     } else if (rect) {
       posRect = rect;
     } else if (isChained && parentId) {
-      posRect = JR.getHighlightRect(JR.getAncestorWithSpans(parentId).spans);
+      var ancestor = JR.getAncestorWithSpans(parentId);
+      if (ancestor && ancestor.spans && ancestor.spans.length > 0) {
+        posRect = JR.getHighlightRect(ancestor.spans);
+      }
+    }
+    if (!posRect) {
+      // Fallback: center in viewport
+      var vw = window.innerWidth, vh = window.innerHeight;
+      posRect = { top: vh / 3, bottom: vh / 3, left: vw / 2, right: vw / 2, width: 0, height: 0 };
     }
 
     JR.positionPopup(popup, posRect, contentContainer, null, spans);
@@ -1415,17 +1829,17 @@
     } else {
       st.activeHighlightId = null;
     }
-    JR.syncHighlightActive(st.activeHighlightId);
-
     // --- Resize + scroll tracking ---
     attachResizeListener(popup, spans, contentContainer);
     attachScrollTracking(popup, spans, contentContainer);
 
-
-    // Selection is cleared by the trigger button click handler;
-    // no need to re-select the source highlight text.
-
-    JR.updateNavWidget();
+    // Defer visual-only work (underlines, nav counter) to next frame so the
+    // popup appears immediately without extra forced layout passes.
+    var deferredHlId = st.activeHighlightId;
+    requestAnimationFrame(function () {
+      JR.syncHighlightActive(deferredHlId);
+      JR.updateNavWidget();
+    });
   };
 
   /**
@@ -1457,7 +1871,7 @@
       }
     }
 
-    showCompletedResponse(popup, upper, hlId, entry, entry.contentContainer);
+    showCompletedResponse(popup, upper, hlId, entry, entry.contentContainer, true);
     JR.repositionPopup();
     // Also reposition on next frame in case pending layout/scroll changes
     // (e.g. ChatGPT auto-scroll after unlock) shift the highlight spans.

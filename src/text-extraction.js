@@ -407,6 +407,42 @@
   };
 
   /**
+   * Quick selection check — returns basic selection info without expensive
+   * sentence extraction. Used to show the trigger button instantly.
+   * Sentence extraction is deferred to when the trigger is clicked.
+   */
+  JR.getSelectedTextQuick = function () {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+
+    var text = selection.toString().trim();
+    if (!text) return null;
+
+    var range = selection.getRangeAt(0);
+    var anchorEl =
+      selection.anchorNode.nodeType === Node.TEXT_NODE
+        ? selection.anchorNode.parentElement
+        : selection.anchorNode;
+    var focusEl =
+      selection.focusNode.nodeType === Node.TEXT_NODE
+        ? selection.focusNode.parentElement
+        : selection.focusNode;
+
+    if (!anchorEl || !focusEl) return null;
+    if (JR.isInsideChatInput(anchorEl) || JR.isInsideChatInput(focusEl)) return null;
+    if (JR.isInsidePopup(anchorEl) || JR.isInsidePopup(focusEl)) return null;
+
+    var anchorArticle = JR.getAIResponseArticle(anchorEl);
+    var focusArticle = JR.getAIResponseArticle(focusEl);
+    if (!anchorArticle || !focusArticle) return null;
+    if (anchorArticle !== focusArticle) return null;
+
+    var rect = range.getBoundingClientRect();
+    var clonedRange = range.cloneRange();
+    return { text: text, sentence: null, blockTypes: null, rect: rect, article: anchorArticle, range: clonedRange };
+  };
+
+  /**
    * Check if a text node is inside a ChatGPT code block toolbar
    * (the bar with language label, copy, run buttons).
    * These elements are inside .contain-inline-size but outside <pre>/<code>.

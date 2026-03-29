@@ -14,6 +14,7 @@
 
   var triggerScrollHandler = null;
   var triggerResizeHandler = null;
+  var triggerSelChangeHandler = null;
 
   function removeTriggerBtn() {
     if (triggerScrollHandler) {
@@ -24,11 +25,16 @@
       window.removeEventListener("resize", triggerResizeHandler);
       triggerResizeHandler = null;
     }
+    if (triggerSelChangeHandler) {
+      document.removeEventListener("selectionchange", triggerSelChangeHandler);
+      triggerSelChangeHandler = null;
+    }
     if (triggerBtn) {
       triggerBtn.remove();
       triggerBtn = null;
       triggerData = null;
     }
+    removeDisableBtn();
   }
   JR.removeTriggerBtn = removeTriggerBtn;
 
@@ -87,6 +93,16 @@
       var data = triggerData;
       removeTriggerBtn();
       if (!data) return;
+
+      // Compute sentence context now (deferred from selection time for speed)
+      if (!data.sentence && data.range) {
+        try {
+          var blockTypes = [];
+          data.sentence = JR.extractSentence(data.range, blockTypes);
+          if (blockTypes.length > 0) data.blockTypes = blockTypes;
+        } catch (ex) { /* sentence context is optional */ }
+      }
+
       // Clear native selection
       var sel = window.getSelection();
       if (sel) sel.removeAllRanges();
@@ -115,11 +131,18 @@
     document.body.appendChild(triggerBtn);
     positionBtn();
 
-    // Reposition on scroll/resize instead of rAF polling
+    // Reposition on scroll/resize, remove when selection disappears
     triggerScrollHandler = function () { if (triggerBtn) positionBtn(); };
     triggerResizeHandler = triggerScrollHandler;
+    triggerSelChangeHandler = function () {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        removeTriggerBtn();
+      }
+    };
     document.addEventListener("scroll", triggerScrollHandler, true);
     window.addEventListener("resize", triggerResizeHandler);
+    document.addEventListener("selectionchange", triggerSelChangeHandler);
   }
   JR.showTriggerBtn = showTriggerBtn;
 
@@ -128,7 +151,8 @@
   function handleSelectionChange() {
     if (st.confirmingDelete) return;
     removeTriggerBtn();
-    var result = JR.getSelectedTextInAIResponse();
+    // Quick check: is there a valid selection in an AI response?
+    var result = JR.getSelectedTextQuick();
     if (!result) return;
     showTriggerBtn(result);
   }
@@ -952,60 +976,89 @@
     if (container) container.style.display = "none";
   }
 
-  function injectDisableBtn(askBtn) {
-    if (askBtn._jrDisableInjected) return;
-    askBtn._jrDisableInjected = true;
+  var activeDisableBtn = null;
 
-    // Make the button a positioning context and slightly wider for the ×
-    if (getComputedStyle(askBtn).position === "static") {
-      askBtn.style.position = "relative";
+  function removeDisableBtn() {
+    if (activeDisableBtn) {
+      activeDisableBtn.remove();
+      activeDisableBtn = null;
     }
-    askBtn.style.paddingRight = (parseInt(getComputedStyle(askBtn).paddingRight, 10) + 16) + "px";
+  }
+
+  function showDisableBtn(askBtn) {
+    removeDisableBtn();
 
     var btn = document.createElement("span");
     btn.className = "jr-popup-disable-btn";
     btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z"/></svg>';
+    activeDisableBtn = btn;
 
-    // Tooltip as a fixed-position element on document.body (escapes all clipping)
+    var r = askBtn.getBoundingClientRect();
+    btn.style.top = (r.top - 8) + "px";
+    btn.style.left = (r.right - 2) + "px";
+
+    // Tooltip
     var tooltip = document.createElement("div");
     tooltip.className = "jr-disable-tooltip";
     tooltip.textContent = "Hide until reload";
 
     btn.addEventListener("mouseenter", function () {
-      var r = btn.getBoundingClientRect();
-      tooltip.style.top = (r.top + r.height / 2) + "px";
-      tooltip.style.left = (r.right + 6) + "px";
+      var br = btn.getBoundingClientRect();
+      tooltip.style.top = (br.top + br.height / 2) + "px";
+      tooltip.style.left = (br.right + 6) + "px";
       document.body.appendChild(tooltip);
     });
     btn.addEventListener("mouseleave", function () {
       if (tooltip.parentNode) tooltip.remove();
     });
 
+    btn.addEventListener("mousedown", function (ev) {
+      // Prevent selection from being cleared so the highlight persists
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+
     btn.addEventListener("click", function (ev) {
       ev.stopPropagation();
       ev.preventDefault();
       if (tooltip.parentNode) tooltip.remove();
+      removeDisableBtn();
       st.askBtnHidden = true;
       hideAskBtn(askBtn);
     });
 
-    askBtn.appendChild(btn);
+    document.body.appendChild(btn);
   }
 
+  // Observer handles both: show × when Ask ChatGPT appears, remove × when
+  // it disappears, and auto-hide if user previously dismissed.
+  // Deferred to rAF so it never blocks trigger button paint.
+  var askBtnObserverPending = false;
   var askBtnObserver = new MutationObserver(function () {
-    var candidates = document.querySelectorAll('button');
-    for (var i = 0; i < candidates.length; i++) {
-      var c = candidates[i];
-      if (c.textContent.trim() === "Ask ChatGPT" && !c._jrDisableInjected && !c.closest(".jr-popup")) {
-        // If disabled, just hide the native button — don't inject ×
-        if (st.askBtnHidden) {
-          c._jrDisableInjected = true;
-          hideAskBtn(c);
-        } else {
-          injectDisableBtn(c);
+    if (askBtnObserverPending) return;
+    askBtnObserverPending = true;
+    requestAnimationFrame(function () {
+      askBtnObserverPending = false;
+      var candidates = document.querySelectorAll('button');
+      var found = null;
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        if (c.textContent.trim() === "Ask ChatGPT" && !c.closest(".jr-popup")) {
+          found = c;
+          break;
         }
       }
-    }
+
+      if (found) {
+        if (st.askBtnHidden) {
+          hideAskBtn(found);
+        } else if (!activeDisableBtn) {
+          showDisableBtn(found);
+        }
+      } else {
+        removeDisableBtn();
+      }
+    });
   });
   askBtnObserver.observe(document.body, { childList: true, subtree: true });
 
@@ -1015,6 +1068,41 @@
 
   // Init the search bar (delay for DOM to be ready)
   setTimeout(JR.initSearchBar, 1500);
+
+  // --- Layout change observer [LAYOUT-LOCKED] — Do not modify ---
+  // ChatGPT sidebar open/close doesn't fire window.resize — it only changes
+  // the chat column width via CSS. Observe the main content area so highlights,
+  // underlines, popups, and arrows stay in sync.
+  (function () {
+    if (typeof ResizeObserver === "undefined") return;
+    function findChatColumn() {
+      return document.querySelector('[class*="react-scroll-to-bottom"]')
+        || document.querySelector("main")
+        || null;
+    }
+    var lastW = 0;
+    var observedEl = null;
+    var ro = new ResizeObserver(function (entries) {
+      var w = entries[0].contentRect.width;
+      if (w === lastW) return;  // height-only change, ignore
+      lastW = w;
+      // Reposition popups/underlines/arrows and toggle nav widget visibility
+      if (st.resizeHandler) st.resizeHandler();
+      if (JR.updateNavWidget) JR.updateNavWidget();
+    });
+    function attach() {
+      var el = findChatColumn();
+      if (el && el !== observedEl) {
+        if (observedEl) ro.unobserve(observedEl);
+        observedEl = el;
+        lastW = el.clientWidth;
+        ro.observe(el);
+      }
+    }
+    attach();
+    // Re-attach after SPA navigations (React may recreate the element)
+    setInterval(attach, 3000);
+  })();
 
   // --- Expose console API to page's main world ---
   // Content scripts run in an isolated world; the browser console

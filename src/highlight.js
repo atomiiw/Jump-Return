@@ -46,6 +46,7 @@
       );
       var textNodes = [];
       var node;
+      var displayCache = new Map(); // cache getComputedStyle results per element
       while ((node = walker.nextNode())) {
         if (range.intersectsNode(node)) {
           // Skip whitespace-only text nodes between block elements
@@ -53,7 +54,11 @@
           if (/^\s*$/.test(node.nodeValue)) {
             var parentEl = node.parentElement;
             if (parentEl) {
-              var pd = getComputedStyle(parentEl).display;
+              var pd = displayCache.get(parentEl);
+              if (pd === undefined) {
+                pd = getComputedStyle(parentEl).display;
+                displayCache.set(parentEl, pd);
+              }
               if (pd !== "inline" && pd !== "inline-block") continue;
             }
           }

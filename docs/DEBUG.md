@@ -38,30 +38,44 @@
 
 19. ~~**Allow resizing popup while response is generating.** Resize drag handles should work during streaming too.~~ **FIXED**
 
-20. **Reply button stops working after closing the reply popup.** Click Reply, get a response, close that nested popup. Now clicking Reply again does nothing. Also, at this point, highlighting text inside the popup starts showing the chat bubble trigger — it shouldn't while the reply child exists but isn't open.
+20. ~~**Reply button stops working after closing the reply popup.**~~ **FIXED**
 
-21. **Edited question should update immediately, not wait for the response.** When I modify my question and send a new version, the old question stays visible while waiting for the new response. It should flip to the new question right away — think of it as: the moment I send version 2, I'm on the version 2 page, which shows the new question + "waiting for response" (or the streaming content). I shouldn't see my old question while the new response is loading.
+21. ~~**Edited question should update immediately, not wait for the response.**~~ **FIXED**
 
-22. **Reply button should be per-version, not shared across all versions.** Each version page should have its own Reply. Right now if I ask a version 2 question and flip to that page, I see version 1's reply. Flip back to version 1 — no reply button. Flip back and forth a few times and the reply button gets stuck on the wrong version. The whole reply button logic needs to be tied to the specific version (item) it belongs to, not the highlight as a whole.
+22. ~~**Reply button should be per-version, not shared across all versions.**~~ **FIXED**
 
-23. **Trash icon disappears after editing a question.** When I modify the question and send a new version, the delete (trash) icon vanishes. It only comes back if I close and reopen the popup.
+23. ~~**Trash icon disappears after editing a question.**~~ **FIXED**
 
-24. **Blank space appears at the bottom of popup when hovering a nested highlight.** When I create a highlight inside a popup response and hover over it to show the underline, a new blank space shows up at the bottom of the popup response area along with the underline.
+24. ~~**Blank space appears at the bottom of popup when hovering a nested highlight.**~~ **FIXED**
 
-25. **Chat bubble trigger button should be inside the popup edge, not outside.** Right now if I highlight a bullet point list inside a popup, the chat bubble hangs just outside the right edge of the popup, moving with the edge. It should be just inside the edge instead.
+25. ~~**Chat bubble trigger button should be inside the popup edge, not outside.**~~ **FIXED**
 
-26. **Long quote blocks should be capped at 6 lines with a scroller.** If the quoted text in the blockquote area is longer than 6 lines, only show 6 lines and add a scroll bar so the user can scroll to see the rest.
+26. ~~**Long quote blocks should be capped at 6 lines with a scroller.**~~ **FIXED**
 
-27. **Nav arrows should be behind popups, not above them.** Currently the highlight navigation arrows sit on top of everything. If a popup window overlaps them, the arrows should get covered up — not float above the popup.
+27. ~~**Nav arrows should be behind popups, not above them.**~~ **FIXED**
 
-28. **Auto-focus the typing bar when Reply is clicked.** As soon as someone clicks Reply, the cursor should be in the input field so they can start typing immediately without having to click on the typing bar first.
+28. ~~**Auto-focus the typing bar when Reply is clicked.**~~ **FIXED**
 
-29. **Reopening a reply popup mid-generation shows stale state.** If I close a reply popup while it's waiting for a response or streaming, then click Reply again, it shows a fresh input box instead of the current in-progress state. Same if I sent a second version — reopening shows version 1 instead of the in-progress version 2. It should behave exactly like reopening a regular highlight mid-generation: show whatever state the popup is in right now (waiting, streaming, or completed).
+29. ~~**Reopening a reply popup mid-generation shows stale state.**~~ **FIXED**
 
-30. **Popup clamping and height caps.** Popups should be clamped horizontally — left edge follows the chat column (adjusts when sidebar expands/collapses, 20px padding), right edge stops before the nav widget (12px gap). Max popup width 720px. Quote block caps at 6 lines with a scroller. Response area caps at 400px (or 50vh) with a scroller. When the popup is squeezed super narrow, the content reflows taller but gets capped by these limits instead of making the popup infinitely long.
+30. ~~**Popup clamping and height caps.**~~ **FIXED**
 
 31. ~~**"Waiting for response" leaks across versions and blocks the queue.**~~ **FIXED**
-    1. ~~"Waiting for response" should be exclusive to its own version page.~~ Fixed — each version page now has its own state (waiting, retry, or response).
-    2. ~~Auto-timeout and retry button.~~ Fixed — 10-second timeout, retry button, offline detection.
+
+33. ~~**Links in popup responses don't open.**~~ **FIXED** — ChatGPT renders links as `<span class="...entity-underline...cursor-pointer...">` with React onClick handlers (not `<a>` tags). Cloning kills the handlers. Fix: `wireResponseClicks` detects entity spans and buttons, `proxyClickToHiddenTurn` finds the matching element in the original hidden response turn (which still has live React handlers) and clicks it — triggering ChatGPT's sidebar panel. Also handles real `<a>` tags via `window.open()` and `processResponseLinks` fixes up hrefs. `mouseup` handler skips entity/button clicks to avoid interference.
+
+34. ~~**Image carousel missing for multi-image responses.**~~ **FIXED — LOCKED, DO NOT MODIFY** — Collapsed 3-thumb gallery with lightbox carousel. Multiple independent image groups per response are detected and each gets its own gallery. Clicking any thumb opens a full-screen lightbox with left/right navigation (fixed to viewport), keyboard support (←/→/Escape), counter, and close button. Closing the lightbox returns to the popup without dismissing it. Components (all marked `[CAROUSEL-LOCKED]` in source):
+    - `src/popup.js`: `isContentImage()`, `processResponseImages()`, `findLCA()`, `buildGallery()`, `openLightbox()`, `GALLERY_VISIBLE` constant, `JR.processResponseImages` export
+    - `src/chat.js`: `JR.processResponseImages` calls in `showResponseInPopup()`
+    - `styles.css`: `.jr-gallery`, `.jr-gallery-thumb`, `.jr-gallery-badge`, `.jr-lightbox`, `.jr-lightbox-img`, `.jr-lightbox-close`, `.jr-lightbox-prev`, `.jr-lightbox-next`, `.jr-lightbox-counter`
+
+35. ~~**"Ask ChatGPT" dismiss × causes layout flash.**~~ **FIXED** — The old approach injected the × inside ChatGPT's native button and modified its `position` and `paddingRight`, which required `getComputedStyle` reads and caused a visible reflow (the button visibly jumped wider). The MutationObserver fires after the browser has already painted, so `visibility: hidden` tricks were unreliable. Fix: the × is now a separate `fixed`-position element on `document.body`, positioned relative to the Ask ChatGPT button's bounding rect. No modifications to the native button at all — zero reflow. Lifecycle: MutationObserver shows × when Ask ChatGPT appears and removes it when Ask ChatGPT disappears; `removeTriggerBtn` also removes ×; × click only removes × (trigger and selection persist via `preventDefault` on mousedown).
+
+36. ~~**Popup slow to appear after clicking trigger button (~500ms).**~~ **FIXED** — Layout thrashing: `highlightRange` mutated DOM, then `createPopup` called `getComputedStyle` (forced layout #1), then `positionPopup` read `offsetWidth/Height` (forced layout #2), then `syncHighlightActive` → `createUnderlines` called more `getComputedStyle`/`getClientRects` (forced layout #3). Each pass ~100-150ms on ChatGPT's complex DOM. Fix: moved the `getComputedStyle` position check into `positionPopup` to batch with existing `getBoundingClientRect`; deferred `syncHighlightActive` + `updateNavWidget` to `requestAnimationFrame`; cached `getComputedStyle` results in `highlightRange`'s TreeWalker loop.
+
+37. ~~**Popup/arrow don't follow highlight on layout change.**~~ **FIXED — LOCKED, DO NOT MODIFY** — When ChatGPT's left sidebar closes, right research sidebar opens, or window is resized, the popup, anchor arrow, and underlines now track the reflowed highlight. Components (all marked `[LAYOUT-LOCKED]` in source):
+    - `src/popup.js`: `attachResizeListener()` — updates left, top, and arrow on resize
+    - `src/popup-helpers.js`: `getPopupMaxRight()` — accounts for right sidebar via chat column right edge; `JR.isRightSidebarOpen()` — detects right sidebar; `JR.updateNavWidget()` — hides nav widget when right sidebar is open
+    - `content.js`: `ResizeObserver` on chat column — fires resize handler + nav widget toggle on sidebar open/close
 
 32. **Stopped questions showing up in the chat.** If I send a question through the popup and then stop ChatGPT's generation immediately, the question (and sometimes the empty response) would show up in the regular chat as if I typed it myself. Never fully solved — avoided by disabling the stop button while a Popup response is generating. Users can still stop their own (non-Popup) questions normally.

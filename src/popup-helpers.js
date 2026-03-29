@@ -5,14 +5,32 @@
   var st = JR.state;
   var NAV_WIDGET_GAP = 12; // px gap between popup right edge and nav widget
 
-  /** Max right edge (in viewport px) a popup may reach. */
-  function getPopupMaxRight() {
-    if (st.navWidget && st.navWidget.isConnected) {
+  /** Max right edge (in viewport px) a popup may reach. [LAYOUT-LOCKED] */
+  function getPopupMaxRight() { // [LAYOUT-LOCKED]
+    if (st.navWidget && st.navWidget.isConnected && st.navWidget.style.display !== "none") {
       return st.navWidget.getBoundingClientRect().left - NAV_WIDGET_GAP;
+    }
+    // When right sidebar is open, use the chat column's right edge
+    var chatCol = document.querySelector('[class*="react-scroll-to-bottom"]')
+      || document.querySelector('main');
+    if (chatCol) {
+      var cr = chatCol.getBoundingClientRect();
+      if (window.innerWidth - cr.right > 200) {
+        return cr.right - 20;
+      }
     }
     return window.innerWidth - 8;
   }
   JR.getPopupMaxRight = getPopupMaxRight;
+
+  /** True when ChatGPT's right sidebar (research/canvas) is visible. [LAYOUT-LOCKED] */
+  JR.isRightSidebarOpen = function () { // [LAYOUT-LOCKED]
+    var chatCol = document.querySelector('[class*="react-scroll-to-bottom"]')
+      || document.querySelector('main');
+    if (!chatCol) return false;
+    var rightGap = window.innerWidth - chatCol.getBoundingClientRect().right;
+    return rightGap > 200;
+  };
 
   /** Min left edge (in viewport px) a popup may reach. */
   function getPopupMinLeft() {
@@ -286,6 +304,7 @@
    * falls back to whichever side the popup actually fits.
    */
   JR.bestDirection = function (highlightRect, popupH, gap, contentContainer) {
+    if (!highlightRect) return "below";
     var spaceBelow = window.innerHeight - highlightRect.bottom - gap;
     var spaceAbove = highlightRect.top - gap;
 
@@ -397,11 +416,15 @@
    * Uses position: absolute relative to the container.
    */
   JR.positionPopup = function (popup, rect, contentContainer, forceDirection, spans) {
+    // Batch layout reads: getBoundingClientRect + getComputedStyle share the same
+    // forced layout, so checking position here avoids an extra layout pass.
     var containerRect = contentContainer.getBoundingClientRect();
+    if (getComputedStyle(contentContainer).position === "static") {
+      contentContainer.style.position = "relative";
+    }
+    contentContainer.style.zIndex = "0";
     var gap = 8;
 
-    popup.style.left = "-9999px";
-    popup.style.top = "-9999px";
     contentContainer.appendChild(popup);
     var popupW = popup.offsetWidth;
     var popupH = popup.offsetHeight;
@@ -700,6 +723,10 @@
     popup.addEventListener("mouseup", function (e) {
       e.stopPropagation();
       if (!e.target.closest(".jr-popup-response")) return;
+      // Don't interfere with link/entity clicks — let the click handler handle them
+      if (e.target.closest("a")) return;
+      if (e.target.closest("span.cursor-pointer[class*='entity-underline'], span.cursor-pointer[class*='entity-accent']")) return;
+      if (e.target.closest("button") && !e.target.closest(".jr-code-block")) return;
       var hlSpan = e.target.closest(".jr-source-highlight");
       if (hlSpan && st.activeSourceHighlights.indexOf(hlSpan) !== -1) {
         var sel = window.getSelection();
@@ -928,19 +955,28 @@
    * Create, update, or hide the floating highlight navigation widget.
    * Only tracks level-1 (non-chained) highlights.
    */
-  JR.updateNavWidget = function () {
+  JR.updateNavWidget = function () { // [LAYOUT-LOCKED] sidebar hide/show logic
     if (navNavigating) return;
 
     var ids = JR.getLevel1HighlightIds();
+    var sidebarOpen = JR.isRightSidebarOpen();
 
-    if (ids.length < 1) {
+    if (ids.length < 1 || sidebarOpen) {
       if (st.navWidget) {
+        if (sidebarOpen && ids.length >= 1) {
+          // Sidebar open but highlights exist — just hide, don't destroy
+          st.navWidget.style.display = "none";
+          return;
+        }
         if (st.navWidget._jrScrollCleanup) st.navWidget._jrScrollCleanup();
         st.navWidget.remove();
         st.navWidget = null;
       }
       return;
     }
+
+    // Sidebar closed — ensure widget is visible
+    if (st.navWidget) st.navWidget.style.display = "";
 
     if (!st.navWidget) {
       st.navWidget = buildNavWidget();
